@@ -20,13 +20,18 @@ The lab records model calls, Prolog calls, input/output tokens, latency, symboli
 
 * Local inference: llama.cpp
 
-Local inference is OpenAI-compatible and defaults to llama.cpp's =llama-server= endpoint:
+The current machine-local benchmark model is:
 
 #+begin_example
-http://127.0.0.1:8080/v1
+benchmark id:   qwen3-8b-q4-k-m
+provider model: Qwen3-8B-Q4_K_M
+endpoint:       http://127.0.0.1:8000/v1
+GGUF:           ~/.local/share/models/Qwen3-8B-Q4_K_M.gguf
 #+end_example
 
-The lab does not start or configure llama.cpp. It talks to the server you already run.
+The provider model name is deliberately the actual llama.cpp alias. Do not hide it behind a generic =local-model= alias; raw benchmark rows should identify what was really served.
+
+The interactive launch/configuration workflow lives in =tasks.org=. Its =launch-server= block starts llama.cpp on port 8000, verifies the advertised model identity, and refuses to continue if another model is already bound there.
 
 Copy the environment template once:
 
@@ -34,39 +39,39 @@ Copy the environment template once:
 cp -n .env.example .env
 #+end_src
 
-If your server uses another address, set =LOCAL_OPENAI_BASE_URL=. If =/v1/models= advertises a model id different from the canonical registry name, set the matching per-model override, for example:
+The committed default is:
 
 #+begin_example
-QWEN35_4B_LOCAL_MODEL=my-loaded-model-id
+LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8000/v1
 #+end_example
-
-Blank override variables do not erase registry defaults.
 
 ** Preflight
 
-Before writing benchmark rows, the runner validates =/v1/models= and checks that the requested model is actually advertised by the endpoint. A dead endpoint or alias mismatch aborts the run instead of producing hundreds of false benchmark failures.
+Before writing benchmark rows, the runner validates =/v1/models= and checks that the requested model is actually advertised by the endpoint. A dead endpoint or model mismatch aborts before any raw results are written.
 
 #+begin_src sh
-make doctor MODEL_ID=qwen35-4b
+make doctor
 #+end_src
 
 For one end-to-end benchmark row:
 
 #+begin_src sh
-make probe MODEL_ID=qwen35-4b
+make probe
 #+end_src
 
-For the smoke matrix on one model:
+For the smoke matrix:
 
 #+begin_src sh
-make smoke MODEL_ID=qwen35-4b
+make smoke
 #+end_src
 
-The same raw result store can contain sessions from multiple local models, so size-class sweeps can be run model-by-model against a single llama.cpp server and analyzed together.
+The Makefile defaults to =MODEL_ID=qwen3-8b-q4-k-m=. Override =MODEL_ID= only after loading the corresponding model into llama.cpp under its real provider model name.
+
+The same raw result store can contain sessions from multiple local models, so size-class sweeps can be run model-by-model against the single-model llama.cpp server and analyzed together.
 
 * Emacs / Org workflow
 
-The primary interactive workflow remains =LAB.org=. It uses async Org Babel blocks for shell and Python execution, =ob-async= when available, and the helpers in =emacs/rlm-lab.el=.
+The primary interactive workflow remains =LAB.org=. Machine-local GPU/server tasks live in =tasks.org=. Both use async Org Babel blocks, with =ob-async= when available.
 
 The Emacs workflow uses the gptel backend and model already active in your running Emacs. It does not create a second provider configuration for findings generation.
 
@@ -120,8 +125,8 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 cp -n .env.example .env
-make doctor MODEL_ID=qwen35-4b
-make probe MODEL_ID=qwen35-4b
+make doctor
+make probe
 make lab
 #+end_src
 
@@ -136,7 +141,9 @@ The generated HTML is =public/index.html=.
 
 * Current model-class snapshot
 
-The shipped model registry is a benchmark-candidate snapshot, not a permanent SOTA claim. Open-weight size classes are currently seeded with Qwen3.5 candidates because the family provides a useful parameter ladder from sub-1B through large MoE models. Closed frontier models stay in a separate class because public parameter counts are unavailable.
+The shipped model registry is a benchmark-candidate snapshot, not a permanent SOTA claim. The machine-local Qwen3 8B GGUF is registered separately from the Qwen3.5 size-class candidates. Size-class candidates are selected explicitly only when those exact models are loaded into llama.cpp.
+
+Closed frontier models stay in a separate class because public parameter counts are unavailable.
 
 Edit =config/models.toml= as the model landscape changes. Analysis groups by declared class rather than hard-coding model names.
 
@@ -156,6 +163,7 @@ Edit =config/models.toml= as the model landscape changes. Analysis groups by dec
 
 #+begin_example
 LAB.org                    interactive benchmark notebook
+tasks.org                  local GPU/server + operational Org tasks
 REPORT.org                 HTML report assembly via #+INCLUDE
 FINDINGS.org               generated analysis narrative
 config/models.toml         model registry
