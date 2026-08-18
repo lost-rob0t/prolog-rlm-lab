@@ -13,15 +13,17 @@ instances_per_difficulty = 10
 
 [recursion]
 levels = [1, 2, 4, 8, 16]
-conditions = ["vanilla", "self_recursive", "rlm", "rlm_verified"]
+conditions = ["base", "agent_plain", "rlm_agent", "rlm_verified"]
 
 [presets.smoke]
 trials = 1
 instances_per_difficulty = 2
 difficulties = ["easy", "medium"]
 recursion_levels = [1, 4]
-conditions = ["vanilla", "rlm_verified"]
+conditions = ["base", "rlm_verified"]
 
+# Legacy recursion sweep retained so sessions already in flight remain directly
+# comparable to earlier runs. self_recursive is an alias of agent_plain.
 [presets.recursion]
 trials = 3
 instances_per_difficulty = 5
@@ -29,29 +31,48 @@ difficulties = ["medium", "hard"]
 recursion_levels = [1, 2, 4, 8, 16]
 conditions = ["self_recursive", "rlm", "rlm_verified"]
 
+# Explicit causal ladder: base model -> same model in a plain agent loop ->
+# same model with Prolog-RLM + verification.
+[presets.compare]
+trials = 2
+instances_per_difficulty = 3
+difficulties = ["medium", "hard"]
+recursion_levels = [1, 2, 4, 8]
+conditions = ["base", "agent_plain", "rlm_verified"]
+
 [presets.classes]
 trials = 3
 instances_per_difficulty = 4
 difficulties = ["medium", "hard"]
 recursion_levels = [1, 4, 8]
-conditions = ["vanilla", "rlm_verified"]
+conditions = ["base", "agent_plain", "rlm_verified"]
+
+# StarIntel-shaped symbolic workloads derived from the server's document,
+# relation, provenance, and recursive actor semantics.
+[presets.starintel]
+trials = 2
+instances_per_difficulty = 3
+families = ["starintel_relation_path", "starintel_provenance", "starintel_actor_loop", "starintel_document_policy"]
+difficulties = ["medium", "hard"]
+recursion_levels = [1, 2, 4, 8]
+conditions = ["base", "agent_plain", "rlm_verified"]
 
 [presets.frontier]
 trials = 2
 instances_per_difficulty = 3
 difficulties = ["hard"]
 recursion_levels = [1, 4, 8]
-conditions = ["vanilla", "rlm_verified"]
+conditions = ["base", "agent_plain", "rlm_verified"]
 
 # Paid comparison designed for a hard application-side spend fuse.
-# Five selected frontier models -> 64 rows/model, 320 rows total.
-# At recursion 1/2 this is at most 80 model calls/model (400 total), with
-# max output reduced to 256 tokens. The Make target uses a $4.25 fuse to
-# leave headroom below the user's absolute $5 budget.
+# Five selected frontier models -> 48 rows/model, 240 rows total.
+# This preserves the causal ladder while using only one deterministic instance
+# per difficulty. The Make target uses a $4.25 fuse, leaving billing headroom
+# below the user's absolute $5 ceiling even if provider accounting drifts.
 [presets.frontier5]
 trials = 1
-instances_per_difficulty = 2
+instances_per_difficulty = 1
 difficulties = ["medium", "hard"]
 recursion_levels = [1, 2]
-conditions = ["vanilla", "rlm_verified"]
+conditions = ["base", "agent_plain", "rlm_verified"]
 max_output_tokens = 256
