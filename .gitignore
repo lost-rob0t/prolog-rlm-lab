@@ -2,7 +2,11 @@
 .env
 __pycache__/
 *.pyc
+.cache/
 results/raw/*.jsonl
+results/raw/*.manifest.json
+results/free/
+results/swebench/
 results/logs/*
 results/summary/*.csv
 results/summary/*.json
