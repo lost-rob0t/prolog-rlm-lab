@@ -151,13 +151,15 @@ def run_condition(
     max_tokens: int,
     temperature: float,
 ) -> RunTrace:
-    if condition == "vanilla":
+    # Explicit names are used in new experiments. Legacy aliases remain accepted
+    # so existing raw sessions and presets stay comparable.
+    if condition in {"base", "vanilla"}:
         return run_vanilla(provider, task, max_tokens=max_tokens, temperature=temperature)
-    if condition == "self_recursive":
+    if condition in {"agent_plain", "self_recursive"}:
         return run_self_recursive(
             provider, task, recursion_level, max_tokens=max_tokens, temperature=temperature
         )
-    if condition in {"rlm", "rlm_verified"}:
+    if condition in {"rlm_agent", "rlm", "rlm_verified"}:
         return run_rlm(
             provider,
             task,
@@ -186,7 +188,7 @@ def run_vanilla(
     ]
     try:
         completion = provider.complete(messages, max_tokens=max_tokens, temperature=temperature)
-        _record_completion(trace, completion, "answer")
+        _record_completion(trace, completion, "base")
         trace.answer = normalize_answer(completion.text)
     except Exception as exc:
         trace.error = str(exc)
@@ -201,13 +203,14 @@ def run_self_recursive(
     max_tokens: int,
     temperature: float,
 ) -> RunTrace:
+    """Plain model-agent baseline with the same turn budget but no Prolog tool."""
     trace = RunTrace()
     messages = [
         {
             "role": "system",
             "content": (
-                "Solve the task using iterative revision. On every turn return only "
-                "JSON {\"answer\":\"...\"}. Keep the answer concise."
+                "Act as an iterative reasoning agent. You have no symbolic or Prolog tool. "
+                "On every turn return only JSON {\"answer\":\"...\"}. Keep the answer concise."
             ),
         },
         {"role": "user", "content": task.prompt},
@@ -215,7 +218,7 @@ def run_self_recursive(
     try:
         for index in range(max(1, recursion_level)):
             completion = provider.complete(messages, max_tokens=max_tokens, temperature=temperature)
-            _record_completion(trace, completion, f"self_recursive_{index}")
+            _record_completion(trace, completion, f"agent_plain_{index}")
             trace.answer = normalize_answer(completion.text)
             if index + 1 < recursion_level:
                 messages.extend(
