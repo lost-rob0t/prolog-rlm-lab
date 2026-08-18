@@ -64,6 +64,34 @@ make smoke MODEL_ID=qwen35-4b
 
 The same raw result store can contain sessions from multiple local models, so size-class sweeps can be run model-by-model against a single llama.cpp server and analyzed together.
 
+* Emacs / Org workflow
+
+The primary interactive workflow remains =LAB.org=. It uses async Org Babel blocks for shell and Python execution, =ob-async= when available, and the helpers in =emacs/rlm-lab.el=.
+
+The Emacs workflow uses the gptel backend and model already active in your running Emacs. It does not create a second provider configuration for findings generation.
+
+The Makefile exposes the workflow as explicit tasks:
+
+#+begin_src sh
+make emacs-check   # verify the running Emacs can load gptel-request and ob-async
+make lab           # open LAB.org through emacsclient
+make findings      # asynchronously generate FINDINGS.org with active gptel
+make report        # generate FINDINGS.org, then export REPORT.org on callback
+make export        # export current REPORT.org without regenerating findings
+#+end_src
+
+=make findings= and =make report= dispatch through =emacsclient= intentionally. The callback continues in the running Emacs process, so asynchronous gptel generation is not killed by a short-lived batch Emacs process.
+
+Inside =LAB.org= the normal flow is:
+
+1. load =emacs/rlm-lab.el= and run =rlm-lab-setup=;
+2. doctor/probe the selected inference model;
+3. run smoke, recursion, and size-class experiments asynchronously;
+4. analyze and generate SVG plots;
+5. preview the evidence packet;
+6. generate =FINDINGS.org= with =gptel-request=;
+7. export =REPORT.org=, whose sections are assembled with =#+INCLUDE:=, to =public/index.html=.
+
 * Remote / OpenRouter inference
 
 Remote models are disabled by default. Enabling an API lane requires both:
@@ -94,18 +122,17 @@ pip install -r requirements.txt
 cp -n .env.example .env
 make doctor MODEL_ID=qwen35-4b
 make probe MODEL_ID=qwen35-4b
+make lab
 #+end_src
 
 After real data exists:
 
 #+begin_src sh
 make analyze
-make export
+make report
 #+end_src
 
-Then open =public/index.html=.
-
-The full Org notebook is =LAB.org=.
+The generated HTML is =public/index.html=.
 
 * Current model-class snapshot
 
@@ -119,6 +146,7 @@ Edit =config/models.toml= as the model landscape changes. Analysis groups by dec
 - SWI-Prolog
 - an OpenAI-compatible model endpoint for real inference
 - Emacs 29+ recommended
+- a running Emacs server for =make lab/findings/report=
 - Org mode
 - =ob-async= for asynchronous Babel blocks
 - =gptel= for generated findings
