@@ -1,6 +1,10 @@
 # Model registry snapshot: 2026-08-18.
 # "candidate" means benchmark candidate for the class, not an eternal SOTA claim.
 # Remote entries are disabled unless --allow-paid is supplied.
+#
+# Local entries target llama.cpp's OpenAI-compatible server by default.
+# Override LOCAL_OPENAI_BASE_URL or the per-model *_LOCAL_MODEL env var when
+# your llama-server advertises a different endpoint/model id.
 
 [[models]]
 id = "qwen35-08b"
@@ -11,6 +15,8 @@ active_parameter_b = 0.8
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-0.8B"
+model_env = "QWEN35_08B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = true
@@ -26,6 +32,8 @@ active_parameter_b = 2.0
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-2B"
+model_env = "QWEN35_2B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = true
@@ -41,6 +49,8 @@ active_parameter_b = 4.0
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-4B"
+model_env = "QWEN35_4B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = true
@@ -56,6 +66,8 @@ active_parameter_b = 9.0
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-9B"
+model_env = "QWEN35_9B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = true
@@ -63,19 +75,21 @@ candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-9B"
 
 [[models]]
-id = "qwen38-27b"
-label = "Qwen3.8 27B"
+id = "qwen35-27b"
+label = "Qwen3.5 27B"
 class = "20to30b-dense"
 parameter_b = 27.0
 active_parameter_b = 27.0
 deployment = "local"
 provider = "openai_compatible"
-model = "Qwen/Qwen3.8-27B"
+model = "Qwen/Qwen3.5-27B"
+model_env = "QWEN35_27B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = true
 candidate = true
-source = "https://huggingface.co/Qwen/Qwen3.8-27B"
+source = "https://huggingface.co/Qwen/Qwen3.5-27B"
 
 [[models]]
 id = "qwen35-35b-a3b"
@@ -86,6 +100,8 @@ active_parameter_b = 3.0
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-35B-A3B"
+model_env = "QWEN35_35B_A3B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = false
@@ -101,6 +117,8 @@ active_parameter_b = 10.0
 deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-122B-A10B"
+model_env = "QWEN35_122B_A10B_LOCAL_MODEL"
+base_url = "http://127.0.0.1:8080/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = false
@@ -108,19 +126,20 @@ candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
 
 [[models]]
-id = "qwen38-24t-a95b"
-label = "Qwen3.8 2.4T-A95B"
+id = "qwen35-397b-a17b"
+label = "Qwen3.5 397B-A17B"
 class = "frontier-open-weight"
-parameter_b = 2400.0
-active_parameter_b = 95.0
+parameter_b = 397.0
+active_parameter_b = 17.0
 deployment = "remote"
 provider = "openai_compatible"
-model_env = "QWEN38_FRONTIER_MODEL"
+model_env = "QWEN35_FRONTIER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
 candidate = true
-source = "https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B"
+source = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B"
 
 [[models]]
 id = "claude-fable-5"
@@ -131,6 +150,7 @@ active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
 model_env = "CLAUDE_FABLE_5_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
@@ -148,6 +168,7 @@ active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
 model_env = "CLAUDE_OPUS_5_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
@@ -165,6 +186,7 @@ active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
 model_env = "GROK_46_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
@@ -182,6 +204,7 @@ active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
 model_env = "GEMINI_37_FLASH_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
@@ -197,6 +220,7 @@ active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
 model_env = "OPENAI_FRONTIER_MODEL"
+base_url = "https://api.openai.com/v1"
 base_url_env = "OPENAI_BASE_URL"
 api_key_env = "OPENAI_API_KEY"
 enabled = false
