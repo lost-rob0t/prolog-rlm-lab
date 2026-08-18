@@ -1,9 +1,15 @@
 MODEL_ID ?= qwen35-4b
 
-.PHONY: demo smoke recursion classes frontier analyze export test clean clean-demo
+.PHONY: demo doctor probe smoke recursion classes frontier analyze export test clean clean-demo
 
 demo:
 	./scripts/demo
+
+doctor:
+	python3 src/doctor.py --deployment local --model-id $(MODEL_ID)
+
+probe:
+	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --limit 1
 
 smoke:
 	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --quiet
