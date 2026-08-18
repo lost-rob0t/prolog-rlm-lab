@@ -26,6 +26,13 @@ DIFFICULTY = {
     "hard": {"depth": 16, "distractors": 60, "events": 45},
 }
 
+STARINTEL_FAMILIES = [
+    "starintel_relation_path",
+    "starintel_provenance",
+    "starintel_actor_loop",
+    "starintel_document_policy",
+]
+
 
 def make_task(family: str, difficulty: str, seed: int) -> Task:
     if difficulty not in DIFFICULTY:
@@ -35,6 +42,10 @@ def make_task(family: str, difficulty: str, seed: int) -> Task:
         "constraints": _constraints,
         "state": _state,
         "authorization": _authorization,
+        "starintel_relation_path": _starintel_relation_path,
+        "starintel_provenance": _starintel_provenance,
+        "starintel_actor_loop": _starintel_actor_loop,
+        "starintel_document_policy": _starintel_document_policy,
     }[family]
     return fn(difficulty, seed)
 
@@ -44,7 +55,7 @@ def _reachability(difficulty: str, seed: int) -> Task:
     rng = random.Random(seed)
     depth = cfg["depth"]
     edges = [(f"n{i}", f"n{i+1}") for i in range(depth)]
-    for i in range(cfg["distractors"]):
+    for _ in range(cfg["distractors"]):
         a = f"d{rng.randrange(max(2, depth * 3))}"
         b = f"d{rng.randrange(max(2, depth * 3))}"
         if a != b:
@@ -74,14 +85,12 @@ def _constraints(difficulty: str, seed: int) -> Task:
     values = list(range(1, size + 1))
     forbidden = sorted({(rng.randrange(size), rng.randrange(size)) for _ in range(size + cfg["distractors"] // 4)})
     forbidden = [(a, b) for a, b in forbidden if a != b]
-    # Construct a guaranteed satisfiable permutation target and constraints that preserve it.
     target = values[:]
     rng.shuffle(target)
     constraints = []
     for a, b in forbidden:
         constraints.append((a, b, target[a] != target[b]))
     clauses = [f"X{i}\\=X{j}" for i in range(size) for j in range(i + 1, size)]
-    # Also include a few ordering constraints that the generated target satisfies.
     order_pairs = []
     for i in range(size - 1):
         a, b = i, i + 1
@@ -158,7 +167,6 @@ def _authorization(difficulty: str, seed: int) -> Task:
     blocked = {(rng.choice(users), rng.choice(resources)) for _ in range(max(1, cfg["distractors"] // 8))}
     target_user = users[0]
     target_resource = resources[-1]
-    # Force a deterministic positive or negative result based on seed parity.
     if seed % 2 == 0:
         user_role[target_user] = "admin"
         blocked.discard((target_user, target_resource))
@@ -190,4 +198,135 @@ def _authorization(difficulty: str, seed: int) -> Task:
         prolog_source=prolog,
         tools={"permitted": 2},
         metadata={"users": len(users), "blocked_pairs": len(blocked)},
+    )
+
+
+def _starintel_relation_path(difficulty: str, seed: int) -> Task:
+    """Directed StarIntel relation traversal using realistic predicate names in the prompt."""
+    cfg = DIFFICULTY[difficulty]
+    rng = random.Random(seed)
+    depth = cfg["depth"]
+    edges: list[tuple[str, str, str]] = []
+    predicates = ["derived-from", "extracted-from", "observed-by", "links-to"]
+    for i in range(depth):
+        edges.append((f"doc{i}", f"doc{i+1}", predicates[i % len(predicates)]))
+    for _ in range(cfg["distractors"]):
+        a = f"noise{rng.randrange(max(3, depth * 3))}"
+        b = f"noise{rng.randrange(max(3, depth * 3))}"
+        if a != b:
+            edges.append((a, b, rng.choice(predicates)))
+    target = f"doc{depth}"
+    human = ["STARINTEL RELATIONS (source --predicate--> target):"]
+    human.extend(f"  {a} --{p}--> {b}" for a, b, p in edges)
+    human.append(f"QUESTION: Is there a directed relation path from doc0 to {target}? Answer YES or NO.")
+    facts = "\n".join(f"relation({a},{b})." for a, b, _ in edges)
+    prolog = facts + "\nrelation_path(A,B):-relation(A,B).\nrelation_path(A,B):-relation(A,C),relation_path(C,B).\n"
+    return Task(
+        id=stable_id("starintel_relation_path", difficulty, seed),
+        family="starintel_relation_path",
+        difficulty=difficulty,
+        seed=seed,
+        prompt="\n".join(human),
+        expected="YES",
+        prolog_source=prolog,
+        tools={"relation_path": 2},
+        metadata={"starintel": True, "relations": len(edges), "logical_depth": depth},
+    )
+
+
+def _starintel_provenance(difficulty: str, seed: int) -> Task:
+    """Resolve recursive provenance to the root document."""
+    cfg = DIFFICULTY[difficulty]
+    rng = random.Random(seed)
+    depth = cfg["depth"]
+    chain = [(f"doc{i}", f"doc{i+1}") for i in range(depth)]
+    distractors: list[tuple[str, str]] = []
+    for _ in range(cfg["distractors"]):
+        a = f"aux{rng.randrange(max(3, depth * 3))}"
+        b = f"aux{rng.randrange(max(3, depth * 3))}"
+        if a != b:
+            distractors.append((a, b))
+    final_doc = f"doc{depth}"
+    human = [
+        "STARINTEL RECURSIVE PROVENANCE:",
+        "Each edge parent -> child corresponds to a derived output and the child's parent_id.",
+    ]
+    human.extend(f"  {a} -> {b}" for a, b in chain + distractors)
+    human.append(f"QUESTION: Is doc0 an ancestor/root source of {final_doc}? Answer YES or NO.")
+    facts = "\n".join(f"parent({b},{a})." for a, b in chain + distractors)
+    prolog = facts + "\nprovenance_ancestor(A,D):-parent(D,A).\nprovenance_ancestor(A,D):-parent(D,P),provenance_ancestor(A,P).\n"
+    return Task(
+        id=stable_id("starintel_provenance", difficulty, seed),
+        family="starintel_provenance",
+        difficulty=difficulty,
+        seed=seed,
+        prompt="\n".join(human),
+        expected="YES",
+        prolog_source=prolog,
+        tools={"provenance_ancestor": 2},
+        metadata={"starintel": True, "depth": depth, "distractors": len(distractors)},
+    )
+
+
+def _starintel_actor_loop(difficulty: str, seed: int) -> Task:
+    """Detect a repeated actor in recursive actor_path metadata."""
+    cfg = DIFFICULTY[difficulty]
+    rng = random.Random(seed)
+    count = max(4, cfg["depth"])
+    actors = [f"actor{i}" for i in range(count)]
+    expected = "YES" if seed % 2 == 0 else "NO"
+    if expected == "YES":
+        source = rng.randrange(max(1, count // 2))
+        actors[-1] = actors[source]
+    human = ["STARINTEL extensions.star_server.actor_path:"]
+    human.append("  [" + ", ".join(actors) + "]")
+    human.append("A repeated actor means the recursive dataflow has re-entered an actor already on this path.")
+    human.append("QUESTION: Does this actor_path contain a recursion loop? Answer YES or NO.")
+    facts = "\n".join(f"actor_hop(trace0,{i},{actor})." for i, actor in enumerate(actors))
+    prolog = facts + "\nloop_detected(T):-actor_hop(T,I,A),actor_hop(T,J,A),I<J.\n"
+    return Task(
+        id=stable_id("starintel_actor_loop", difficulty, seed),
+        family="starintel_actor_loop",
+        difficulty=difficulty,
+        seed=seed,
+        prompt="\n".join(human),
+        expected=expected,
+        prolog_source=prolog,
+        tools={"loop_detected": 1},
+        metadata={"starintel": True, "actor_hops": len(actors)},
+    )
+
+
+def _starintel_document_policy(difficulty: str, seed: int) -> Task:
+    """Check canonical StarIntel dtype policy versus explicitly rejected aliases."""
+    canonical = ["person", "org", "relation", "target", "domain", "host", "network", "url", "email", "message"]
+    rejected = ["organization", "organisation", "investigation_target", "social_media_post", "email_message"]
+    rng = random.Random(seed)
+    if seed % 2 == 0:
+        dtype = rng.choice(canonical)
+        expected = "YES"
+    else:
+        dtype = rng.choice(rejected)
+        expected = "NO"
+    noise_count = DIFFICULTY[difficulty]["distractors"]
+    noise = [rng.choice(canonical + rejected) for _ in range(noise_count)]
+    human = [
+        "STARINTEL 0.9 DOCUMENT POLICY:",
+        "Canonical dtypes are accepted; legacy/rejected aliases are not silently normalized.",
+        "Reference examples: " + ", ".join(noise),
+        f"Candidate dtype: {dtype}",
+        "QUESTION: Is the candidate dtype canonical/accepted by this policy? Answer YES or NO.",
+    ]
+    facts = "\n".join(f"canonical_dtype({name})." for name in canonical)
+    prolog = facts + "\nvalid_dtype(D):-canonical_dtype(D).\n"
+    return Task(
+        id=stable_id("starintel_document_policy", difficulty, seed),
+        family="starintel_document_policy",
+        difficulty=difficulty,
+        seed=seed,
+        prompt="\n".join(human),
+        expected=expected,
+        prolog_source=prolog,
+        tools={"valid_dtype": 1},
+        metadata={"starintel": True, "candidate_dtype": dtype, "reference_items": noise_count},
     )
