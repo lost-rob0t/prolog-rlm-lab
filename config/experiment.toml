@@ -65,7 +65,8 @@ recursion_levels = [1, 4, 8]
 conditions = ["base", "agent_plain", "rlm_verified"]
 
 # Paid comparison designed for a hard application-side spend fuse.
-# Five selected frontier models -> 48 rows/model, 240 rows total.
+# Single-call base rows are emitted only at recursion level 1, so five selected
+# frontier models produce 40 rows/model, 200 rows total.
 # This preserves the causal ladder while using only one deterministic instance
 # per difficulty. The Make target uses a $4.25 fuse, leaving billing headroom
 # below the user's absolute $5 ceiling even if provider accounting drifts.
