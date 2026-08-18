@@ -1,7 +1,9 @@
 MODEL_ID ?= qwen3-8b-q4-k-m
 EMACSCLIENT ?= emacsclient
+FRONTIER5_MODELS = qwen35-397b-a17b gemini-3-flash grok-45 gpt56-sol claude-opus-5
+FRONTIER5_ARGS = $(foreach model,$(FRONTIER5_MODELS),--model-id $(model))
 
-.PHONY: demo doctor probe smoke recursion classes classes-all frontier analyze export \
+.PHONY: demo doctor probe smoke recursion classes classes-all frontier frontier5 frontier5-dry analyze export \
 	emacs-check lab findings report test clean clean-demo
 
 demo:
@@ -31,7 +33,14 @@ classes-all:
 	./scripts/analyze
 
 frontier:
-	@echo "Remote benchmark is never implicit. Run: ./scripts/bench --preset frontier --deployment remote --allow-paid --model-id MODEL_ID"
+	@echo "Remote benchmark is never implicit. Use make frontier5 for the capped comparison, or invoke scripts/bench explicitly."
+
+frontier5-dry:
+	./scripts/bench --preset frontier5 --deployment remote --allow-paid --max-cost-usd 4.25 --dry-run $(FRONTIER5_ARGS)
+
+frontier5:
+	./scripts/bench --preset frontier5 --deployment remote --allow-paid --max-cost-usd 4.25 $(FRONTIER5_ARGS)
+	./scripts/analyze
 
 analyze:
 	./scripts/analyze
