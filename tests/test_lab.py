@@ -140,15 +140,15 @@ class LabTests(unittest.TestCase):
             },
             "recursion": {
                 "levels": [1, 2, 4, 8, 16],
-                "conditions": ["vanilla", "self_recursive", "rlm", "rlm_verified"],
+                "conditions": ["base", "agent_plain", "rlm_agent", "rlm_verified"],
             },
             "presets": {
                 "frontier5": {
                     "trials": 1,
-                    "instances_per_difficulty": 2,
+                    "instances_per_difficulty": 1,
                     "difficulties": ["medium", "hard"],
                     "recursion_levels": [1, 2],
-                    "conditions": ["vanilla", "rlm_verified"],
+                    "conditions": ["base", "agent_plain", "rlm_verified"],
                     "max_output_tokens": 256,
                 }
             },
@@ -156,7 +156,7 @@ class LabTests(unittest.TestCase):
         matrix = resolve_matrix(config, "frontier5")
         self.assertEqual(matrix["max_tokens"], 256)
         self.assertEqual(matrix["recursion_levels"], [1, 2])
-        self.assertEqual(matrix["conditions"], ["vanilla", "rlm_verified"])
+        self.assertEqual(matrix["conditions"], ["base", "agent_plain", "rlm_verified"])
         runs_per_model = (
             len(matrix["families"])
             * len(matrix["difficulties"])
@@ -165,7 +165,7 @@ class LabTests(unittest.TestCase):
             * len(matrix["recursion_levels"])
             * matrix["trials"]
         )
-        self.assertEqual(runs_per_model, 64)
+        self.assertEqual(runs_per_model, 48)
 
     @unittest.skipUnless(shutil.which("swipl"), "SWI-Prolog not installed")
     def test_reachability_tool(self):
