@@ -22,6 +22,7 @@ class RunTrace:
     output_tokens: int = 0
     model_latency_ms: float = 0.0
     prolog_latency_ms: float = 0.0
+    cost_usd: float = 0.0
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
 
@@ -113,6 +114,7 @@ def _record_completion(trace: RunTrace, completion: Completion, role: str) -> No
     trace.input_tokens += completion.input_tokens
     trace.output_tokens += completion.output_tokens
     trace.model_latency_ms += completion.latency_ms
+    trace.cost_usd += completion.cost_usd
     trace.events.append({
         "type": "model",
         "role": role,
@@ -120,6 +122,7 @@ def _record_completion(trace: RunTrace, completion: Completion, role: str) -> No
         "input_tokens": completion.input_tokens,
         "output_tokens": completion.output_tokens,
         "latency_ms": completion.latency_ms,
+        "cost_usd": completion.cost_usd,
     })
 
 
