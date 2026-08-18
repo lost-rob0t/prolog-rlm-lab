@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
-import sys
 import time
 import tomllib
-from pathlib import Path
 from typing import Any
 
 from providers import ModelSpec, OpenAICompatibleProvider
@@ -24,6 +21,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="hard cap on run count")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="skip /models endpoint validation (not recommended for real runs)",
+    )
     return parser.parse_args()
 
 
@@ -70,6 +72,17 @@ def select_models(models: list[ModelSpec], args: argparse.Namespace) -> list[Mod
     return selected
 
 
+def preflight_models(models: list[ModelSpec], timeout_s: int) -> bool:
+    print("provider preflight:")
+    all_ok = True
+    for model in models:
+        result = OpenAICompatibleProvider(model, timeout_s=timeout_s).probe()
+        status = "OK" if result.ok else "FAIL"
+        print(f"  [{status}] {model.id}: {result.detail}")
+        all_ok = all_ok and result.ok
+    return all_ok
+
+
 def main() -> int:
     args = parse_args()
     config, models = load_config()
@@ -98,6 +111,10 @@ def main() -> int:
             print(model.id, family, difficulty, instance, condition, recursion, trial)
         return 0
 
+    if not args.skip_preflight and not preflight_models(selected, matrix["timeout_s"]):
+        print("preflight failed; no benchmark rows were written")
+        return 3
+
     session_id = stable_id(now_iso(), args.preset, len(combinations))
     out_path = ROOT / "results/raw" / f"{session_id}.jsonl"
     manifest_path = ROOT / "results/raw" / f"{session_id}.manifest.json"
@@ -109,6 +126,7 @@ def main() -> int:
         "models": [model.id for model in selected],
         "matrix": matrix,
         "planned_runs": len(combinations),
+        "preflight": "skipped" if args.skip_preflight else "passed",
     }
     write_json(manifest_path, manifest)
 
@@ -143,6 +161,8 @@ def main() -> int:
             "active_parameter_b": model.active_parameter_b,
             "provider": model.provider,
             "deployment": model.deployment,
+            "provider_model": model.model,
+            "provider_base_url": model.base_url,
             "task_id": task.id,
             "task_family": task.family,
             "difficulty": task.difficulty,
