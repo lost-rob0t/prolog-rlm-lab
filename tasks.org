@@ -286,4 +286,3 @@ fi
 - =llama-server= binds to ~127.0.0.1~ only; no port is exposed externally.
 - The =configure-lab= block is idempotent and guarded by a marker comment,
   so it is safe to re-run.
-#+end_src
