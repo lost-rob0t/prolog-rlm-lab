@@ -38,6 +38,14 @@ Machine-local llama.cpp launch, GPU verification, OpenRouter configuration, and 
 The current experiment matrix is defined in [[file:config/experiment.toml][config/experiment.toml]].
 The current model registry is [[file:config/models.toml][config/models.toml]].
 
+The main causal comparison now has three explicit conditions:
+
+- =base=: one model completion with no agent loop or Prolog;
+- =agent_plain=: the same model with an iterative agent/revision loop but no Prolog;
+- =rlm_verified=: the same turn budget with Prolog-RLM symbolic queries and verification.
+
+Legacy names such as =vanilla= and =self_recursive= remain accepted so old and in-flight sessions stay comparable.
+
 The intended size lanes are:
 
 - sub-1B
@@ -86,11 +94,29 @@ make smoke | ./scripts/filter-output --lines 100
 
 * Recursion sweep
 
-This is the important axis. Keep the model fixed and sweep recursion levels before comparing model sizes.
+The legacy recursion preset is retained unchanged for already-running datasets. It uses the earlier condition labels but remains analyzable beside new sessions.
 
 #+begin_src sh :async yes
 make recursion | ./scripts/filter-output --lines 120
 #+end_src
+
+* Base vs plain-agent vs Prolog-RLM
+
+This is the preferred causal comparison for new data. It separates gains from merely having an iterative agent loop from gains due to symbolic offload.
+
+#+begin_src sh :async yes
+make compare | ./scripts/filter-output --lines 140
+#+end_src
+
+* StarIntel workload
+
+These tasks are shaped from actual StarIntel semantics: directed relation traversal, recursive provenance, actor-path loop detection, and canonical document dtype policy.
+
+#+begin_src sh :async yes
+make starintel | ./scripts/filter-output --lines 140
+#+end_src
+
+The StarIntel task families live in =src/tasks.py= and are deterministic. They use general Prolog predicates over benchmark-generated StarIntel-shaped state rather than hard-coded answer predicates.
 
 * Size-class sweep
 
@@ -104,9 +130,86 @@ To benchmark another size class, load that exact model and pass its registry id 
 
 =make classes-all= exists only for an endpoint that really advertises every enabled local model at once.
 
+* Paid frontier comparison under five dollars
+
+The capped frontier lane compares =base=, =agent_plain=, and =rlm_verified= across five selected frontier models. The runner has an application-side cost fuse at =$4.25= so there is margin below the absolute $5 ceiling.
+
+Preview the matrix without making a paid completion:
+
+#+begin_src sh :async yes
+make frontier5-dry | ./scripts/filter-output --lines 120
+#+end_src
+
+Run the capped comparison:
+
+#+begin_src sh :async yes
+make frontier5 | ./scripts/filter-output --lines 160
+#+end_src
+
+* OpenRouter free-model stress suite
+
+The free lane discovers exact =:free= model variants from OpenRouter at runtime and requires prompt, completion, and per-request pricing to all be zero. Results go to =results/free/= rather than contaminating paid/local raw sessions.
+
+List currently discovered free variants without making a completion:
+
+#+begin_src sh :async yes
+make openrouter-free-list | ./scripts/filter-output --lines 160
+#+end_src
+
+Run a broad zero-cost battery with the default 40-request fuse:
+
+#+begin_src sh :async yes
+make openrouter-free-deep | ./scripts/filter-output --lines 200
+#+end_src
+
+The suite exercises base, plain-agent, Prolog-RLM, and StarIntel-shaped tasks. It aborts if provider-reported usage cost is nonzero. Increase =OPENROUTER_FREE_MODELS= or =OPENROUTER_FREE_REQUESTS= explicitly when your account's free-model rate limit permits it.
+
+The random =openrouter/free= router is measured separately because it does not preserve a fixed model identity:
+
+#+begin_src sh :async yes
+make openrouter-free-router | ./scripts/filter-output --lines 200
+#+end_src
+
+* SWE-bench
+
+SWE-bench is an optional second benchmark layer. The lab generates three prediction files per instance and delegates pass/fail to the official Docker evaluation harness.
+
+The three generation conditions are:
+
+- =base=: issue plus deterministic lexical repository context, one patch attempt;
+- =agent_plain=: same initial context plus read/search/apply-diff tools;
+- =rlm_agent=: identical agent tools plus persistent SWI-Prolog symbolic memory/query.
+
+Install the isolated SWE-bench dependencies and verify Docker/harness prerequisites:
+
+#+begin_src sh :async yes
+make swebench-deps
+make swebench-doctor
+#+end_src
+
+Validate the official evaluator against a gold patch before model experiments:
+
+#+begin_src sh :async yes
+make swebench-gold | ./scripts/filter-output --lines 120
+#+end_src
+
+Generate a small three-condition SWE-bench Lite batch with the local model:
+
+#+begin_src sh :async yes
+make swebench-generate SWE_LIMIT=3 SWE_TURNS=8 MODEL_ID=qwen3-8b-q4-k-m | ./scripts/filter-output --lines 180
+#+end_src
+
+The generator prints a session id. Evaluate all three prediction files with the official harness:
+
+#+begin_src sh :async yes
+make swebench-evaluate SWE_SESSION=<session-id> SWE_WORKERS=2 | ./scripts/filter-output --lines 200
+#+end_src
+
+Generated predictions and telemetry live under =results/swebench/= and are gitignored. Repository mirrors are cached under =.cache/swebench/=.
+
 * Remote frontier sweep
 
-This is intentionally explicit. It can cost money.
+For uncapped research runs, invoke =scripts/bench= explicitly with =--allow-paid=. This path can cost real money and is intentionally not the default.
 
 #+begin_src sh :async yes
 ./scripts/bench --preset frontier --deployment remote --allow-paid --model-id claude-opus-5 --quiet | ./scripts/filter-output --lines 120
@@ -197,4 +300,6 @@ The resulting report is [[file:public/index.html][public/index.html]].
 - Keep the benchmark id distinct from the provider model name, but make both truthful.
 - Treat API aliases as mutable unless the provider explicitly documents them as pinned.
 - Compare recursion curves under the same token and call budgets.
+- Compare =base=, =agent_plain=, and Prolog-RLM with the same model and initial context before attributing gains to symbolic reasoning.
+- SWE-bench pass/fail comes from the official harness, not an LLM self-grader.
 - Report failures, timeouts, malformed responses, and missing usage metadata rather than silently dropping them.
