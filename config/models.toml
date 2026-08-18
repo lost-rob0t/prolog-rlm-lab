@@ -2,9 +2,29 @@
 # "candidate" means benchmark candidate for the class, not an eternal SOTA claim.
 # Remote entries are disabled unless --allow-paid is supplied.
 #
-# Local entries target llama.cpp's OpenAI-compatible server by default.
-# Override LOCAL_OPENAI_BASE_URL or the per-model *_LOCAL_MODEL env var when
-# your llama-server advertises a different endpoint/model id.
+# The machine-local llama.cpp server is a single-model endpoint on port 8000.
+# Its advertised model name is kept literal so result metadata says what was
+# actually served instead of hiding it behind a generic alias.
+
+[[models]]
+id = "qwen3-8b-q4-k-m"
+label = "Qwen3 8B Q4_K_M (local GPU)"
+class = "7to12b"
+parameter_b = 8.19
+active_parameter_b = 8.19
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen3-8B-Q4_K_M"
+base_url = "http://127.0.0.1:8000/v1"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = false
+source = "https://huggingface.co/Qwen/Qwen3-8B-GGUF"
+
+# Size-class candidates. These are selected explicitly when their matching
+# model is loaded into llama.cpp; they are not all assumed to be resident on
+# the single-model local endpoint at once.
 
 [[models]]
 id = "qwen35-08b"
@@ -16,10 +36,10 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-0.8B"
 model_env = "QWEN35_08B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
-enabled = true
+enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-0.8B"
 
@@ -33,10 +53,10 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-2B"
 model_env = "QWEN35_2B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
-enabled = true
+enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-2B"
 
@@ -50,10 +70,10 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-4B"
 model_env = "QWEN35_4B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
-enabled = true
+enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-4B"
 
@@ -67,10 +87,10 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-9B"
 model_env = "QWEN35_9B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
-enabled = true
+enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-9B"
 
@@ -84,10 +104,10 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-27B"
 model_env = "QWEN35_27B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
-enabled = true
+enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-27B"
 
@@ -101,7 +121,7 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-35B-A3B"
 model_env = "QWEN35_35B_A3B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = false
@@ -118,7 +138,7 @@ deployment = "local"
 provider = "openai_compatible"
 model = "Qwen/Qwen3.5-122B-A10B"
 model_env = "QWEN35_122B_A10B_LOCAL_MODEL"
-base_url = "http://127.0.0.1:8080/v1"
+base_url = "http://127.0.0.1:8000/v1"
 base_url_env = "LOCAL_OPENAI_BASE_URL"
 api_key_env = "LOCAL_API_KEY"
 enabled = false
