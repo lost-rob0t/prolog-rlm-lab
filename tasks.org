@@ -1,494 +1,340 @@
 #+TITLE: Prolog RLM Lab — Local GPU Inference Tasks
-#+PROPERTY: header-args:shell :prologue "set -euo pipefail\nROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]:-$0}\")\" && pwd)\""
-#+PROPERTY: header-args:shell+ :exports both :results output
-#+PROPERTY: header-args:shell+ :async yes
-#+PROPERTY: header-args:python :exports both :results output
+#+OPTIONS: toc:2 num:nil
+#+PROPERTY: header-args:shell :exports both :results output replace :async yes
+#+PROPERTY: header-args:python :exports both :results output replace
 
-This file orchestrates the local GPU inference stack for the Prolog RLM Lab.
+This notebook owns the machine-local llama.cpp workflow used by the lab.
 
-Hardware: AMD Radeon RX 5500 XT (Navi 14 / RDNA1, 8 GiB VRAM).
-Backend: ~llama.cpp~ with the Vulkan backend (~ggml-vulkan~) via the Arch
-=llama-cpp= + =ggml= + =ggml-cpu= + =ggml-vulkan= packages. ROCm is not
-used: Navi 14 is not an officially supported ROCm target. The Arch ggml
-split keeps the CPU backend separate; it must be installed even when
-offloading fully to the GPU.
+Local runtime identity is intentionally literal:
 
-The model served is =Qwen3-8B-Q4_K_M= under the alias =local-model=, bound
-to ~127.0.0.1:8080~ only. ~local-model~ is the alias the lab registry points
-at through =LOCAL_OPENAI_BASE_URL=.
+- benchmark id: =qwen3-8b-q4-k-m=
+- provider model: =Qwen3-8B-Q4_K_M=
+- GGUF: =~/.local/share/models/Qwen3-8B-Q4_K_M.gguf=
+- endpoint: =http://127.0.0.1:8000/v1=
+- backend: llama.cpp Vulkan on the AMD Radeon RX 5500 XT
 
-* Phase A — Launch the inference server
+Do not replace the provider model with a generic alias such as =local-model=.
+The benchmark should record the model that was actually served.
 
-This block starts ~llama-server~ in the background, fully offloaded to the
-GPU (~-ngl 99~), 8192-token context, OpenAI-compatible API on
-~127.0.0.1:8080~, alias =local-model=. Logs go to
-=/tmp/llama-server.lab.log=. It is idempotent: a running server on 8080 is
-left alone.
+* Phase A — Launch llama.cpp
 
-The Arch backend packages are split, so the block first verifies that
-=llama-cpp=, =ggml=, =ggml-cpu=, and =ggml-vulkan= are all installed. The CPU
-backend is required even for full GPU offload (buffer fallbacks); without it
-the server fails with =no CPU backend found=.
+The launch block is idempotent only when port 8000 is already serving the
+expected model. If another model is present it fails loudly rather than
+quietly benchmarking the wrong weights. Humanity has enough mislabeled
+benchmarks already.
 
 #+name: launch-server
 #+begin_src shell :async yes
-# Verify backend packages (Arch splits ggml into core + per-backend packages).
+set -euo pipefail
+PORT=8000
+MODEL="$HOME/.local/share/models/Qwen3-8B-Q4_K_M.gguf"
+PROVIDER_MODEL='Qwen3-8B-Q4_K_M'
+LOG=/tmp/llama-server.lab.log
+
 for pkg in llama-cpp ggml ggml-cpu ggml-vulkan; do
     if ! pacman -Qi "$pkg" >/dev/null 2>&1; then
-        echo "MISSING: $pkg not installed. Run: sudo pacman -S --needed $pkg"
+        echo "MISSING: $pkg"
+        echo "install with: sudo pacman -S --needed llama-cpp ggml ggml-cpu ggml-vulkan"
         exit 1
     fi
 done
-echo "backend packages OK: llama-cpp ggml ggml-cpu ggml-vulkan"
 
-if pgrep -af 'llama-server.*--port 8080' >/dev/null 2>&1; then
-    echo "llama-server already running on 127.0.0.1:8080"
-    pgrep -af 'llama-server.*--port 8080' | head -1
-    exit 0
+if [ ! -r "$MODEL" ]; then
+    echo "model not found: $MODEL"
+    exit 1
 fi
-MODEL=/home/unseen/.local/share/models/Qwen3-8B-Q4_K_M.gguf
-LOG=/tmp/llama-server.lab.log
+
+if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/tmp/rlm-lab-models.json 2>/dev/null; then
+    if python3 - "$PROVIDER_MODEL" </tmp/rlm-lab-models.json <<'PY'
+import json, sys
+wanted = sys.argv[1]
+data = json.load(sys.stdin)
+ids = [row.get("id") for row in data.get("data", [])]
+print("advertised:", ", ".join(str(x) for x in ids))
+raise SystemExit(0 if wanted in ids else 1)
+PY
+    then
+        echo "llama-server already ready on 127.0.0.1:${PORT} with ${PROVIDER_MODEL}"
+        exit 0
+    fi
+    echo "port ${PORT} is serving a different model; stop it before launching this benchmark model"
+    exit 1
+fi
+
 nohup llama-server \
     --model "$MODEL" \
-    --alias local-model \
-    --host 127.0.0.1 --port 8080 \
+    --alias "$PROVIDER_MODEL" \
+    --host 127.0.0.1 \
+    --port "$PORT" \
     --n-gpu-layers 99 \
     --ctx-size 8192 \
-    --temp 0.7 \
     --jinja \
-    > "$LOG" 2>&1 < /dev/null &
-disown
-echo "launched llama-server, pid=$!, log=$LOG"
+    >"$LOG" 2>&1 </dev/null &
+
+echo "launched llama-server pid=$!"
+echo "model=$PROVIDER_MODEL"
+echo "endpoint=http://127.0.0.1:${PORT}/v1"
+echo "log=$LOG"
 #+end_src
 
-#+RESULTS: launch-server
-: backend packages OK: llama-cpp ggml ggml-cpu ggml-vulkan
-: launched llama-server, pid=1998074, log=/tmp/llama-server.lab.log
-
-* Phase B — Wait for readiness
-
-Polls the ~~/health~ endpoint until the server reports ~ok~ or the timeout
-expires. Run this after =launch-server=.
+* Phase B — Wait for readiness and verify identity
 
 #+name: wait-server
 #+begin_src shell :async yes
+set -euo pipefail
+PORT=8000
+PROVIDER_MODEL='Qwen3-8B-Q4_K_M'
+
 for i in $(seq 1 60); do
-    if curl -fsS http://127.0.0.1:8080/health 2>/dev/null | grep -q '"status":"ok"'; then
+    if curl -fsS "http://127.0.0.1:${PORT}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+        MODELS="$(curl -fsS "http://127.0.0.1:${PORT}/v1/models")"
+        printf '%s' "$MODELS" | python3 - "$PROVIDER_MODEL" <<'PY'
+import json, sys
+wanted = sys.argv[1]
+data = json.load(sys.stdin)
+ids = [row.get("id") for row in data.get("data", [])]
+print("models:", ", ".join(str(x) for x in ids))
+if wanted not in ids:
+    raise SystemExit(f"expected {wanted!r}, endpoint advertises {ids!r}")
+PY
         echo "ready after ${i}s"
-        curl -fsS http://127.0.0.1:8080/health
         exit 0
     fi
     sleep 1
 done
+
 echo "server not ready after 60s"
-tail -40 /tmp/llama-server.lab.log
+tail -60 /tmp/llama-server.lab.log
 exit 1
 #+end_src
 
-#+RESULTS: wait-server
-: ready after 1s
-: {"status":"ok"}
-
 * Phase C — Prove GPU acceleration
-
-Confirms the model is loaded with full GPU offload and reports prompt
-processing and generation tokens/sec via a small =llama-bench= run. The
-device line must show the Radeon RX 5500 XT; if it falls back to CPU only,
-the bench numbers will be an order of magnitude lower and the log should be
-inspected.
 
 #+name: gpu-bench
 #+begin_src shell :async yes
-echo "=== devices reported by server ==="
-curl -fsS http://127.0.0.1:8080/health | python3 -m json.tool 2>/dev/null || true
-echo
-echo "=== llama-bench (pp512 + tg128, 3 runs) ==="
+set -euo pipefail
+MODEL="$HOME/.local/share/models/Qwen3-8B-Q4_K_M.gguf"
+
+echo "=== llama-bench ==="
 llama-bench \
-    --model /home/unseen/.local/share/models/Qwen3-8B-Q4_K_M.gguf \
+    --model "$MODEL" \
     -ngl 99 \
-    -p 512 -n 128 \
+    -p 512 \
+    -n 128 \
     -r 3 \
-    2>&1 | tail -20
+    2>&1 | tail -25
+
 echo
-echo "=== tail of server log (offload confirmation) ==="
-grep -Ei 'ggml_vulkan|device|offload|VRAM|ngl|loaded model|model loaded' /tmp/llama-server.lab.log | tail -15
+echo "=== server GPU/offload evidence ==="
+grep -Ei 'ggml_vulkan|device|offload|VRAM|loaded model|model loaded' \
+    /tmp/llama-server.lab.log | tail -25 || true
 #+end_src
 
-#+RESULTS: gpu-bench
-#+begin_example
-=== devices reported by server ===
-{
-    "status": "ok"
-}
-
-=== llama-bench (pp512 + tg128, 3 runs) ===
-warning: asserts enabled, performance may be affected
-ggml_vulkan: Found 1 Vulkan devices:
-ggml_vulkan: 0 = AMD Radeon RX 5500 XT (RADV NAVI14) (radv) | uma: 0 | fp16: dot2 | bf16: 0 | fp4: 0 | warp size: 32 | shared memory: 65536 | int dot: 1 | matrix cores: none
-load_backend: loaded Vulkan backend from /usr/lib/ggml/libggml-vulkan.so
-load_backend: loaded CPU backend from /usr/lib/ggml/libggml-cpu-haswell.so
-| model                          |       size |     params | backend    | ngl |            test |                  t/s |
-| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
-| qwen3 8B Q4_K - Medium         |   4.68 GiB |     8.19 B | Vulkan     |  99 |           pp512 |         87.96 ± 0.86 |
-| qwen3 8B Q4_K - Medium         |   4.68 GiB |     8.19 B | Vulkan     |  99 |           tg128 |          2.56 ± 0.01 |
-
-build: 9b05354ec6 (10433)
-
-=== tail of server log (offload confirmation) ===
-0.06.881.239 I srv  llama_server: model loaded
-#+end_example
 * Phase D — API smoke test
-
-Sends a direct OpenAI-compatible chat completion to =local-model= asking
-for the literal string =LOCAL_GPU_OK=. Anything else is a failure.
-
-Qwen3 is a hybrid thinking model: by default it emits an internal
-reasoning trace under =reasoning_content= before the answer. Two
-consequences for this smoke test:
-- =max_tokens= must be large enough to cover both the reasoning trace and
-  the final answer (32 is too small; 256 is safe).
-- =/no_think= in the user prompt suppresses the trace so the answer lands
-  directly in =content= with low latency.
-
-The block parses the JSON and prints =content= (falling back to
-=reasoning_content= if =content= is empty) plus a usage line so a silent
-thinking-model regression is obvious.
 
 #+name: api-smoke
 #+begin_src shell :async yes
-curl -fsS http://127.0.0.1:8080/v1/chat/completions \
+set -euo pipefail
+curl -fsS http://127.0.0.1:8000/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -d '{
-        "model": "local-model",
+        "model": "Qwen3-8B-Q4_K_M",
         "messages": [{"role":"user","content":"Reply with exactly LOCAL_GPU_OK /no_think"}],
         "max_tokens": 256,
         "temperature": 0.0,
         "stream": false
     }' \
-    | python3 -c '
-import sys, json
-d = json.load(sys.stdin)
-msg = d["choices"][0]["message"]
+| python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+msg = r["choices"][0]["message"]
 content = msg.get("content") or ""
-reasoning = msg.get("reasoning_content") or ""
-usage = d.get("usage", {})
-print("content:        " + repr(content))
-if reasoning:
-    print("reasoning tail: " + repr(reasoning[-120:]))
-print("finish_reason:  " + d["choices"][0]["finish_reason"])
-print("tokens:         prompt=" + str(usage.get("prompt_tokens")) + " completion=" + str(usage.get("completion_tokens")))
+usage = r.get("usage", {})
+print("content:", repr(content))
+print("finish_reason:", r["choices"][0].get("finish_reason"))
+print("tokens:", usage.get("prompt_tokens"), usage.get("completion_tokens"))
+if "LOCAL_GPU_OK" not in content:
+    raise SystemExit("unexpected smoke-test response")
 '
 #+end_src
 
 * Phase E — Configure the lab
 
-Idempotently sets =LOCAL_OPENAI_BASE_URL= in =.env= and adds a
-=local-model= registry entry to =config/models.toml= so the lab's
-~openai_compatible~ provider routes to the running server. Existing entries
-are left untouched; a marker comment guards the injected block so reruns do
-not duplicate it.
+The model registry is committed to the repository. This block only aligns
+=.env= with the canonical port. It does not mutate =config/models.toml=.
 
 #+name: configure-lab
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
 
-# .env: set LOCAL_OPENAI_BASE_URL (create file if absent)
-if [ ! -f .env ]; then
-    cp .env.example .env
-fi
+[ -f .env ] || cp .env.example .env
+
 if grep -q '^LOCAL_OPENAI_BASE_URL=' .env; then
-    sed -i 's|^LOCAL_OPENAI_BASE_URL=.*|LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8080/v1|' .env
+    sed -i 's|^LOCAL_OPENAI_BASE_URL=.*|LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8000/v1|' .env
 else
-    printf 'LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8080/v1\n' >> .env
+    printf 'LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8000/v1\n' >>.env
 fi
+
 if ! grep -q '^LOCAL_API_KEY=' .env; then
-    printf 'LOCAL_API_KEY=\n' >> .env
+    printf 'LOCAL_API_KEY=\n' >>.env
 fi
-echo ".env:"
-grep -E '^(LOCAL_OPENAI_BASE_URL|LOCAL_API_KEY)=' .env
 
-# models.toml: add a local-model entry if absent
-MARKER='# local-gpu-task block'
-if ! grep -qF "$MARKER" config/models.toml; then
-    cat >> config/models.toml <<EOF
+printf 'configured: '
+grep '^LOCAL_OPENAI_BASE_URL=' .env
 
-$MARKER
-[[models]]
-id = "local-model"
-label = "Qwen3-8B Q4_K_M (local GPU)"
-class = "7to12b"
-parameter_b = 8.0
-active_parameter_b = 8.0
-deployment = "local"
-provider = "openai_compatible"
-model = "local-model"
-base_url_env = "LOCAL_OPENAI_BASE_URL"
-api_key_env = "LOCAL_API_KEY"
-enabled = true
-candidate = true
-source = "https://huggingface.co/Qwen/Qwen3-8B-GGUF"
-EOF
-    echo "added local-model entry to config/models.toml"
-else
-    echo "local-model entry already present in config/models.toml"
-fi
-tail -16 config/models.toml
+grep -q 'id = "qwen3-8b-q4-k-m"' config/models.toml
+grep -q 'model = "Qwen3-8B-Q4_K_M"' config/models.toml
+echo "registry identity OK: qwen3-8b-q4-k-m -> Qwen3-8B-Q4_K_M"
 #+end_src
 
-* Phase E2 — Set OpenRouter API key
+* Phase F — Doctor and one-row probe
 
-The lab's remote lane routes through OpenRouter. Remote models in
-=config/models.toml= are disabled by default and only run when
-=--allow-paid= is passed to =scripts/bench= (see =src/bench.py=). Enabling
-them requires =OPENROUTER_API_KEY= plus per-model slug variables in =.env=.
-
-This block is Emacs Lisp so it can prompt you securely via
-~read-passwd~ (no echo, never written to shell history, the Org results
-buffer, or the kill ring). It writes the key to =./.secrets/openrouter-key=
-(mode 0600), ensures =.secrets/= is gitignored, then writes
-=OPENROUTER_API_KEY= and =OPENROUTER_BASE_URL= into =.env= idempotently.
-Nothing leaves the project directory and nothing is echoed.
-
-Optional per-model slug variables (=QWEN38_FRONTIER_MODEL= etc.) are read
-from =config/openrouter-slugs.env= if present (format: =KEY=slug= per line)
-and merged into =.env=.
-
-#+name: set-openrouter-key
-#+begin_src emacs-lisp :exports both :results output
-(require 'subr-x)
-
-(defconst rlm-lab-root
-  (expand-file-name (file-name-directory (or (buffer-file-name) default-directory))))
-
-(defun rlm-lab--file (name) (expand-file-name name rlm-lab-root))
-
-(defun rlm-lab--ensure-gitignore-secrets ()
-  "Ensure .secrets/ is listed in .gitignore."
-  (let ((gi (rlm-lab--file ".gitignore")))
-    (let ((lines (if (file-exists-p gi) (split-string (with-temp-buffer (insert-file-contents gi) (buffer-string)) "\n" t) nil)))
-      (unless (member ".secrets/" lines)
-        (with-temp-buffer
-          (insert (if (and lines (not (string= "" (car (last lines))))) "\n" ""))
-          (insert ".secrets/\n")
-          (append-to-file (point-min) (point-max) gi))))))
-
-(defun rlm-lab--write-env-pair (key value)
-  "Idempotently set KEY=VALUE in .env."
-  (let ((envf (rlm-lab--file ".env")))
-    (unless (file-exists-p envf)
-      (copy-file (rlm-lab--file ".env.example") envf t))
-    (with-temp-buffer
-      (insert-file-contents envf)
-      (if (re-search-forward (concat "^" (regexp-quote key) "=.*$") nil t)
-          (replace-match (concat key "=" value))
-        (goto-char (point-max))
-        (unless (bolp) (insert "\n"))
-        (insert key "=" value "\n"))
-      (write-region (point-min) (point-max) envf nil 'silent))
-    (set-file-modes envf #o600)))
-
-(defun rlm-lab--mask (key line)
-  (if (string-prefix-p (concat key "=") line)
-      (concat key "=<masked>")
-    line))
-
-(let* ((secrets-dir (rlm-lab--file ".secrets/"))
-       (keyfile (expand-file-name "openrouter-key" secrets-dir))
-       (key (read-passwd "OpenRouter API key (paste, then RET): ")))
-  (when (or (null key) (string-empty-p (string-trim key)))
-    (error "empty key, aborting"))
-  (make-directory secrets-dir t)
-  (set-file-modes secrets-dir #o700)
-  (with-temp-file keyfile (insert (string-trim key) "\n"))
-  (set-file-modes keyfile #o600)
-  (rlm-lab--ensure-gitignore-secrets)
-  (rlm-lab--write-env-pair "OPENROUTER_BASE_URL" "https://openrouter.ai/api/v1")
-  (rlm-lab--write-env-pair "OPENROUTER_API_KEY" (string-trim key))
-
-  ;; Optional per-model slugs
-  (let ((slugs (rlm-lab--file "config/openrouter-slugs.env")))
-    (if (file-exists-p slugs)
-        (with-temp-buffer
-          (insert-file-contents slugs)
-          (goto-char (point-min))
-          (while (not (eobp))
-            (let* ((line (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
-                   (trim (string-trim line)))
-              (cond
-               ((string-empty-p trim) nil)
-               ((string-prefix-p "#" trim) nil)
-               (t
-                (let ((idx (string-match-p "=" trim)))
-                  (when (and idx (> idx 0))
-                    (let ((k (substring trim 0 idx)) (v (substring trim (1+ idx))))
-                      (when (and (not (string-empty-p k)) (not (string-empty-p v)))
-                        (rlm-lab--write-env-pair k v)
-                        (message "slug set: %s" k)))))))
-              (forward-line 1))))
-      (message "no config/openrouter-slugs.env; per-model slug vars left untouched")))
-
-  ;; Report (masked)
-  (let ((envf (rlm-lab--file ".env")))
-    (princ (concat "OPENROUTER_API_KEY written to .env (length="
-                   (number-to-string (length (string-trim key))) ")\n"))
-    (princ (concat "secret file: " keyfile " (mode 0600)\n\n"))
-    (princ "=== relevant .env entries (keys masked) ===\n")
-    (with-temp-buffer
-      (insert-file-contents envf)
-      (goto-char (point-min))
-      (while (re-search-forward "^\\(OPENROUTER_BASE_URL\\|OPENROUTER_API_KEY\\|QWEN38_FRONTIER_MODEL\\|CLAUDE_FABLE_5_OPENROUTER_MODEL\\|CLAUDE_OPUS_5_OPENROUTER_MODEL\\|GROK_46_OPENROUTER_MODEL\\|GEMINI_37_FLASH_OPENROUTER_MODEL\\)=.*$" nil t)
-        (princ (concat (match-string 0) "\n")))))
-  nil)
-#+end_src
-
-* Phase E3 — OpenRouter dry-run (no spend)
-
-Lists which remote models the bench would select and the planned run count
-without making any API call. Requires the key from Phase E2. Use this to
-confirm slug variables and model selection before paying for a real run.
-
-#+name: openrouter-dry-run
+#+name: doctor
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-. .venv/bin/activate 2>/dev/null || true
-set -a; . ./.env; set +a
-echo "=== remote models enabled in registry ==="
-python3 - <<'PY'
-import tomllib
-with open("config/models.toml","rb") as f:
-    cfg = tomllib.load(f)
-for m in cfg.get("models",[]):
-    if m.get("deployment") == "remote":
-        print(f"  id={m['id']:<22} enabled={m.get('enabled',False)} class={m.get('class')}")
-PY
-echo
-echo "=== dry-run, preset=smoke, deployment=remote, --allow-paid ==="
-./scripts/bench --preset smoke --deployment remote --allow-paid --dry-run
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+make doctor MODEL_ID=qwen3-8b-q4-k-m
 #+end_src
 
-* Phase F — Check lab environment
-
-Runs the lab's own environment check plus a Python import sanity check.
-
-#+name: check-env
+#+name: probe
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-./scripts/check-env
-echo
-python3 - <<'PY'
-import sys
-try:
-    import matplotlib
-    print(f"matplotlib OK ({matplotlib.__version__})")
-except Exception as exc:
-    print(f"matplotlib MISSING: {exc}", file=sys.stderr)
-PY
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+make probe MODEL_ID=qwen3-8b-q4-k-m
 #+end_src
 
-* Phase G — Install Python dependencies (optional)
-
-Creates a local venv and installs =requirements.txt=. Skip if
-=./venv= already exists.
-
-#+name: deps
-#+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-if [ -d .venv ]; then
-    echo ".venv exists, skipping"
-else
-    python3 -m venv .venv
-    . .venv/bin/activate
-    pip install --quiet --upgrade pip
-    pip install --quiet -r requirements.txt
-    echo "installed into .venv"
-fi
-. .venv/bin/activate 2>/dev/null || true
-python3 -c 'import matplotlib; print("matplotlib", matplotlib.__version__)'
-#+end_src
-
-* Phase H — Smoke benchmark against =local-model=
-
-Runs the lab's =smoke= preset against the local GPU server through the
-registry entry created in Phase E. Uses =MODEL_ID=local-model=.
+* Phase G — Smoke benchmark
 
 #+name: bench-smoke
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-. .venv/bin/activate 2>/dev/null || true
-MODEL_ID=local-model ./scripts/bench --preset smoke --deployment local --model-id local-model --quiet
-./scripts/analyze
-echo
-echo "=== summary ==="
-ls -la results/summary/ 2>/dev/null
-cat results/summary/metrics.org 2>/dev/null | head -40
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+make smoke MODEL_ID=qwen3-8b-q4-k-m
 #+end_src
 
-* Phase I — RLM recursion benchmark against =local-model=
-
-The deeper preset exercising recursion levels 1, 2, 4, 8, 16 under
-=self_recursive=, =rlm=, =rlm_verified=. Slower than smoke; run async.
+* Phase H — Recursion sweep
 
 #+name: bench-recursion
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-. .venv/bin/activate 2>/dev/null || true
-MODEL_ID=local-model ./scripts/bench --preset recursion --deployment local --model-id local-model --quiet
-./scripts/analyze
-echo
-echo "=== summary ==="
-ls -la results/summary/ 2>/dev/null
-cat results/summary/metrics.org 2>/dev/null | head -60
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+make recursion MODEL_ID=qwen3-8b-q4-k-m
 #+end_src
 
-* Phase J — Export HTML report
+* Phase I — OpenRouter key
 
-Rebuilds =public/index.html= from =REPORT.org= via the lab's batch export
-helper. Requires Emacs.
+This uses Emacs =read-passwd= so the key is not echoed into Org results or
+shell history. It updates =.env= in place and sets mode 0600.
+
+#+name: set-openrouter-key
+#+begin_src emacs-lisp :results output
+(require 'subr-x)
+(let* ((root (file-name-directory (or buffer-file-name default-directory)))
+       (env-file (expand-file-name ".env" root))
+       (template (expand-file-name ".env.example" root))
+       (key (string-trim (read-passwd "OpenRouter API key: "))))
+  (when (string-empty-p key)
+    (error "empty OpenRouter key"))
+  (unless (file-exists-p env-file)
+    (copy-file template env-file))
+  (with-temp-buffer
+    (insert-file-contents env-file)
+    (goto-char (point-min))
+    (if (re-search-forward "^OPENROUTER_API_KEY=.*$" nil t)
+        (replace-match (concat "OPENROUTER_API_KEY=" key) t t)
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert "OPENROUTER_API_KEY=" key "\n"))
+    (goto-char (point-min))
+    (if (re-search-forward "^OPENROUTER_BASE_URL=.*$" nil t)
+        (replace-match "OPENROUTER_BASE_URL=https://openrouter.ai/api/v1" t t)
+      (goto-char (point-max))
+      (insert "OPENROUTER_BASE_URL=https://openrouter.ai/api/v1\n"))
+    (write-region (point-min) (point-max) env-file nil 'silent))
+  (set-file-modes env-file #o600)
+  (princ "OpenRouter configuration written; key not displayed\n"))
+#+end_src
+
+* Phase J — OpenRouter dry run
+
+No provider request is made by =--dry-run=.
+
+#+name: openrouter-dry-run
+#+begin_src shell :async yes
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+./scripts/bench --preset frontier --deployment remote --allow-paid --dry-run
+#+end_src
+
+* Phase K — Analyze and graph
+
+#+name: analyze
+#+begin_src shell :async yes
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+./scripts/analyze | ./scripts/filter-output --lines 120
+#+end_src
+
+* Phase L — Emacs/gptel workflow
+
+The report workflow remains Emacs-native. =make findings= dispatches the
+asynchronous gptel request using the active Emacs backend/model. =make report=
+generates findings and exports =REPORT.org= after the callback completes.
+
+#+name: emacs-check
+#+begin_src shell :async yes
+cd "$(git rev-parse --show-toplevel)"
+make emacs-check
+#+end_src
+
+#+name: open-lab
+#+begin_src shell :async yes
+cd "$(git rev-parse --show-toplevel)"
+make lab
+#+end_src
+
+#+name: generate-findings
+#+begin_src shell :async yes
+cd "$(git rev-parse --show-toplevel)"
+make findings
+#+end_src
+
+#+name: generate-report
+#+begin_src shell :async yes
+cd "$(git rev-parse --show-toplevel)"
+make report
+#+end_src
+
+* Phase M — Export HTML without regenerating findings
 
 #+name: export-report
 #+begin_src shell :async yes
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-cd "$ROOT"
-./scripts/export
-echo
-ls -la public/index.html
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+make export
+ls -lh public/index.html
 #+end_src
 
-* Phase K — Stop the inference server
-
-Cleanly terminates the =llama-server= process spawned in Phase A. Use this
-to release VRAM when the lab work is done.
+* Phase N — Stop llama.cpp
 
 #+name: stop-server
 #+begin_src shell :async yes
-pkill -TERM -f 'llama-server.*--port 8080' 2>/dev/null || true
+set -euo pipefail
+pkill -TERM -f 'llama-server.*--port 8000' 2>/dev/null || true
 sleep 2
-if pgrep -af 'llama-server.*--port 8080' >/dev/null 2>&1; then
-    echo "still running, sending KILL"
-    pkill -KILL -f 'llama-server.*--port 8080' 2>/dev/null || true
-else
-    echo "stopped"
+if pgrep -af 'llama-server.*--port 8000' >/dev/null 2>&1; then
+    pkill -KILL -f 'llama-server.*--port 8000' 2>/dev/null || true
 fi
+echo "llama-server on port 8000 stopped"
 #+end_src
 
-#+RESULTS: stop-server
-: stopped
+* Notes
 
-* Tangles and notes
-
-- All ~shell~ blocks are ~:async yes~ so ~ob-async~ dispatches them to a
-  background buffer. Without ~ob-async~, they still run synchronously.
-- Phases A → D prove the GPU stack. Phase E wires the stack into the lab.
-  Phases F → I run real lab work. Phase J exports. Phase K tears down.
-- The =local-model= alias is stable; the lab registry uses the same string
-  in =config/models.toml= (~model = "local-model"~) and the =--model-id=
-  passed to =scripts/bench=.
-- =llama-server= binds to ~127.0.0.1~ only; no port is exposed externally.
-- The =configure-lab= block is idempotent and guarded by a marker comment,
-  so it is safe to re-run.
+- Shell blocks are asynchronous when =ob-async= is installed.
+- The local server binds only to =127.0.0.1:8000=.
+- =Qwen3-8B-Q4_K_M= is both the llama.cpp alias and the provider model id.
+- =qwen3-8b-q4-k-m= is the benchmark registry id.
+- Size-class candidates use their own true model names when loaded; do not
+  remap them to the currently loaded Qwen3 8B model.
+- Raw rows preserve =provider_model= and =provider_base_url= for auditability.
