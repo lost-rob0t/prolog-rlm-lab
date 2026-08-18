@@ -5,7 +5,7 @@
 
 * What this is
 
-A local-first, provider-agnostic Org-mode benchmark lab for measuring Prolog-RLM reasoning offload.
+An Org-mode benchmark lab for measuring how much model capability Prolog-RLM can substitute with symbolic state, search, recursion, and verification.
 
 The benchmark varies:
 
@@ -16,16 +16,74 @@ The benchmark varies:
 - execution condition (vanilla, self-recursive, RLM, RLM+verification),
 - token budget and trial seed.
 
-The important outputs are not merely accuracy. The lab records model calls, Prolog calls, input/output tokens, latency, symbolic-runtime time, failures, and optional API cost. It then generates plots and a polished HTML report.
+The lab records model calls, Prolog calls, input/output tokens, latency, symbolic-runtime time, failures, endpoint identity, provider model identity, and optional API cost. Analysis generates tables, SVG plots, Org fragments, and the HTML report.
 
-* Safety against accidental API spend
+* Local inference: llama.cpp
+
+Local inference is OpenAI-compatible and defaults to llama.cpp's =llama-server= endpoint:
+
+#+begin_example
+http://127.0.0.1:8080/v1
+#+end_example
+
+The lab does not start or configure llama.cpp. It talks to the server you already run.
+
+Copy the environment template once:
+
+#+begin_src sh
+cp -n .env.example .env
+#+end_src
+
+If your server uses another address, set =LOCAL_OPENAI_BASE_URL=. If =/v1/models= advertises a model id different from the canonical registry name, set the matching per-model override, for example:
+
+#+begin_example
+QWEN35_4B_LOCAL_MODEL=my-loaded-model-id
+#+end_example
+
+Blank override variables do not erase registry defaults.
+
+** Preflight
+
+Before writing benchmark rows, the runner validates =/v1/models= and checks that the requested model is actually advertised by the endpoint. A dead endpoint or alias mismatch aborts the run instead of producing hundreds of false benchmark failures.
+
+#+begin_src sh
+make doctor MODEL_ID=qwen35-4b
+#+end_src
+
+For one end-to-end benchmark row:
+
+#+begin_src sh
+make probe MODEL_ID=qwen35-4b
+#+end_src
+
+For the smoke matrix on one model:
+
+#+begin_src sh
+make smoke MODEL_ID=qwen35-4b
+#+end_src
+
+The same raw result store can contain sessions from multiple local models, so size-class sweeps can be run model-by-model against a single llama.cpp server and analyzed together.
+
+* Remote / OpenRouter inference
 
 Remote models are disabled by default. Enabling an API lane requires both:
 
-1. setting the matching API key/environment variables, and
-2. explicitly requesting remote models on the benchmark command line.
+1. setting the matching API key and exact provider model slug in =.env=, and
+2. explicitly passing =--allow-paid=.
 
 The harness never silently falls back from local inference to a paid endpoint.
+
+Example preflight:
+
+#+begin_src sh
+python3 src/doctor.py --deployment remote --allow-paid --model-id claude-opus-5
+#+end_src
+
+Example run:
+
+#+begin_src sh
+./scripts/bench --preset frontier --deployment remote --allow-paid --model-id claude-opus-5
+#+end_src
 
 * Quick start
 
@@ -33,33 +91,33 @@ The harness never silently falls back from local inference to a paid endpoint.
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-make demo
+cp -n .env.example .env
+make doctor MODEL_ID=qwen35-4b
+make probe MODEL_ID=qwen35-4b
+#+end_src
+
+After real data exists:
+
+#+begin_src sh
+make analyze
 make export
 #+end_src
 
 Then open =public/index.html=.
 
-For real inference, point =LOCAL_OPENAI_BASE_URL= at an OpenAI-compatible local server (vLLM, llama.cpp server, SGLang, etc.), configure model aliases in =config/models.toml=, then run:
-
-#+begin_src sh
-make smoke
-#+end_src
-
 The full Org notebook is =LAB.org=.
 
 * Current model-class snapshot
 
-The shipped model registry is a *benchmark candidate snapshot*, not a permanent claim that one vendor will remain best forever.
+The shipped model registry is a benchmark-candidate snapshot, not a permanent SOTA claim. Open-weight size classes are currently seeded with Qwen3.5 candidates because the family provides a useful parameter ladder from sub-1B through large MoE models. Closed frontier models stay in a separate class because public parameter counts are unavailable.
 
-Open-weight size classes are seeded with current Qwen-family candidates because the current official collections expose clean parameter-scale coverage from sub-1B through frontier MoE. The registry also has a separate remote-frontier lane for closed models whose parameter counts are not public.
-
-Edit =config/models.toml= as the model landscape changes. The analysis groups by declared class rather than hard-coding model names.
+Edit =config/models.toml= as the model landscape changes. Analysis groups by declared class rather than hard-coding model names.
 
 * Requirements
 
 - Python 3.11+
 - SWI-Prolog
+- an OpenAI-compatible model endpoint for real inference
 - Emacs 29+ recommended
 - Org mode
 - =ob-async= for asynchronous Babel blocks
@@ -74,9 +132,10 @@ REPORT.org                 HTML report assembly via #+INCLUDE
 FINDINGS.org               generated analysis narrative
 config/models.toml         model registry
 config/experiment.toml     benchmark matrix
-src/bench.py               runner
+src/bench.py               runner + mandatory provider preflight
+src/doctor.py              endpoint/model diagnostics
 src/tasks.py               deterministic task generators
-src/providers.py           local/OpenAI-compatible providers
+src/providers.py           OpenAI-compatible provider + /models probe
 src/rlm.py                 recursive symbolic tool loop
 src/analyze.py             summaries and Org tables
 src/plots.py               SVG plot generation
@@ -109,16 +168,16 @@ TOR = 1 - (RLM model tokens / vanilla model tokens)
 
 ** Symbolic Work Share (SWS)
 
-A descriptive execution metric, not a claim about consciousness or hidden reasoning:
+A descriptive execution metric:
 
 #+begin_example
 SWS = prolog_calls / (prolog_calls + model_calls)
 #+end_example
 
-This is useful for comparing how much of the *observable control loop* moves into the symbolic runtime.
+This compares how much of the observable control loop moves into the symbolic runtime.
 
 * Experimental fairness
 
 The task generator owns one symbolic world. Both vanilla and RLM conditions receive the same task information. The RLM condition additionally receives access to general symbolic query machinery, not task-specific answer predicates hand-written per instance.
 
-Every run stores a seed and a raw record. Do not trust a benchmark result that cannot be replayed.
+Every run stores its seed, provider endpoint, provider model id, and raw trace. Do not trust a benchmark result that cannot be replayed.
