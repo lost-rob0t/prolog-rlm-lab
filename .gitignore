@@ -9,3 +9,5 @@ results/summary/*.json
 results/plots/*.svg
 public/*.html
 !results/**/.gitkeep
+
+.secrets/

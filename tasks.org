@@ -8,8 +8,10 @@ This file orchestrates the local GPU inference stack for the Prolog RLM Lab.
 
 Hardware: AMD Radeon RX 5500 XT (Navi 14 / RDNA1, 8 GiB VRAM).
 Backend: ~llama.cpp~ with the Vulkan backend (~ggml-vulkan~) via the Arch
-=llama-cpp= + =ggml= + =ggml-vulkan= packages. ROCm is not used: Navi 14 is
-not an officially supported ROCm target.
+=llama-cpp= + =ggml= + =ggml-cpu= + =ggml-vulkan= packages. ROCm is not
+used: Navi 14 is not an officially supported ROCm target. The Arch ggml
+split keeps the CPU backend separate; it must be installed even when
+offloading fully to the GPU.
 
 The model served is =Qwen3-8B-Q4_K_M= under the alias =local-model=, bound
 to ~127.0.0.1:8080~ only. ~local-model~ is the alias the lab registry points
@@ -23,8 +25,22 @@ GPU (~-ngl 99~), 8192-token context, OpenAI-compatible API on
 =/tmp/llama-server.lab.log=. It is idempotent: a running server on 8080 is
 left alone.
 
+The Arch backend packages are split, so the block first verifies that
+=llama-cpp=, =ggml=, =ggml-cpu=, and =ggml-vulkan= are all installed. The CPU
+backend is required even for full GPU offload (buffer fallbacks); without it
+the server fails with =no CPU backend found=.
+
 #+name: launch-server
 #+begin_src shell :async yes
+# Verify backend packages (Arch splits ggml into core + per-backend packages).
+for pkg in llama-cpp ggml ggml-cpu ggml-vulkan; do
+    if ! pacman -Qi "$pkg" >/dev/null 2>&1; then
+        echo "MISSING: $pkg not installed. Run: sudo pacman -S --needed $pkg"
+        exit 1
+    fi
+done
+echo "backend packages OK: llama-cpp ggml ggml-cpu ggml-vulkan"
+
 if pgrep -af 'llama-server.*--port 8080' >/dev/null 2>&1; then
     echo "llama-server already running on 127.0.0.1:8080"
     pgrep -af 'llama-server.*--port 8080' | head -1
@@ -45,6 +61,10 @@ disown
 echo "launched llama-server, pid=$!, log=$LOG"
 #+end_src
 
+#+RESULTS: launch-server
+: backend packages OK: llama-cpp ggml ggml-cpu ggml-vulkan
+: launched llama-server, pid=1998074, log=/tmp/llama-server.lab.log
+
 * Phase B — Wait for readiness
 
 Polls the ~~/health~ endpoint until the server reports ~ok~ or the timeout
@@ -64,6 +84,10 @@ echo "server not ready after 60s"
 tail -40 /tmp/llama-server.lab.log
 exit 1
 #+end_src
+
+#+RESULTS: wait-server
+: ready after 1s
+: {"status":"ok"}
 
 * Phase C — Prove GPU acceleration
 
@@ -90,10 +114,45 @@ echo "=== tail of server log (offload confirmation) ==="
 grep -Ei 'ggml_vulkan|device|offload|VRAM|ngl|loaded model|model loaded' /tmp/llama-server.lab.log | tail -15
 #+end_src
 
+#+RESULTS: gpu-bench
+#+begin_example
+=== devices reported by server ===
+{
+    "status": "ok"
+}
+
+=== llama-bench (pp512 + tg128, 3 runs) ===
+warning: asserts enabled, performance may be affected
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon RX 5500 XT (RADV NAVI14) (radv) | uma: 0 | fp16: dot2 | bf16: 0 | fp4: 0 | warp size: 32 | shared memory: 65536 | int dot: 1 | matrix cores: none
+load_backend: loaded Vulkan backend from /usr/lib/ggml/libggml-vulkan.so
+load_backend: loaded CPU backend from /usr/lib/ggml/libggml-cpu-haswell.so
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| qwen3 8B Q4_K - Medium         |   4.68 GiB |     8.19 B | Vulkan     |  99 |           pp512 |         87.96 ± 0.86 |
+| qwen3 8B Q4_K - Medium         |   4.68 GiB |     8.19 B | Vulkan     |  99 |           tg128 |          2.56 ± 0.01 |
+
+build: 9b05354ec6 (10433)
+
+=== tail of server log (offload confirmation) ===
+0.06.881.239 I srv  llama_server: model loaded
+#+end_example
 * Phase D — API smoke test
 
 Sends a direct OpenAI-compatible chat completion to =local-model= asking
 for the literal string =LOCAL_GPU_OK=. Anything else is a failure.
+
+Qwen3 is a hybrid thinking model: by default it emits an internal
+reasoning trace under =reasoning_content= before the answer. Two
+consequences for this smoke test:
+- =max_tokens= must be large enough to cover both the reasoning trace and
+  the final answer (32 is too small; 256 is safe).
+- =/no_think= in the user prompt suppresses the trace so the answer lands
+  directly in =content= with low latency.
+
+The block parses the JSON and prints =content= (falling back to
+=reasoning_content= if =content= is empty) plus a usage line so a silent
+thinking-model regression is obvious.
 
 #+name: api-smoke
 #+begin_src shell :async yes
@@ -101,12 +160,24 @@ curl -fsS http://127.0.0.1:8080/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -d '{
         "model": "local-model",
-        "messages": [{"role":"user","content":"Reply with exactly LOCAL_GPU_OK"}],
-        "max_tokens": 16,
+        "messages": [{"role":"user","content":"Reply with exactly LOCAL_GPU_OK /no_think"}],
+        "max_tokens": 256,
         "temperature": 0.0,
         "stream": false
     }' \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["choices"][0]["message"]["content"])'
+    | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+msg = d["choices"][0]["message"]
+content = msg.get("content") or ""
+reasoning = msg.get("reasoning_content") or ""
+usage = d.get("usage", {})
+print("content:        " + repr(content))
+if reasoning:
+    print("reasoning tail: " + repr(reasoning[-120:]))
+print("finish_reason:  " + d["choices"][0]["finish_reason"])
+print("tokens:         prompt=" + str(usage.get("prompt_tokens")) + " completion=" + str(usage.get("completion_tokens")))
+'
 #+end_src
 
 * Phase E — Configure the lab
@@ -163,6 +234,138 @@ else
     echo "local-model entry already present in config/models.toml"
 fi
 tail -16 config/models.toml
+#+end_src
+
+* Phase E2 — Set OpenRouter API key
+
+The lab's remote lane routes through OpenRouter. Remote models in
+=config/models.toml= are disabled by default and only run when
+=--allow-paid= is passed to =scripts/bench= (see =src/bench.py=). Enabling
+them requires =OPENROUTER_API_KEY= plus per-model slug variables in =.env=.
+
+This block is Emacs Lisp so it can prompt you securely via
+~read-passwd~ (no echo, never written to shell history, the Org results
+buffer, or the kill ring). It writes the key to =./.secrets/openrouter-key=
+(mode 0600), ensures =.secrets/= is gitignored, then writes
+=OPENROUTER_API_KEY= and =OPENROUTER_BASE_URL= into =.env= idempotently.
+Nothing leaves the project directory and nothing is echoed.
+
+Optional per-model slug variables (=QWEN38_FRONTIER_MODEL= etc.) are read
+from =config/openrouter-slugs.env= if present (format: =KEY=slug= per line)
+and merged into =.env=.
+
+#+name: set-openrouter-key
+#+begin_src emacs-lisp :exports both :results output
+(require 'subr-x)
+
+(defconst rlm-lab-root
+  (expand-file-name (file-name-directory (or (buffer-file-name) default-directory))))
+
+(defun rlm-lab--file (name) (expand-file-name name rlm-lab-root))
+
+(defun rlm-lab--ensure-gitignore-secrets ()
+  "Ensure .secrets/ is listed in .gitignore."
+  (let ((gi (rlm-lab--file ".gitignore")))
+    (let ((lines (if (file-exists-p gi) (split-string (with-temp-buffer (insert-file-contents gi) (buffer-string)) "\n" t) nil)))
+      (unless (member ".secrets/" lines)
+        (with-temp-buffer
+          (insert (if (and lines (not (string= "" (car (last lines))))) "\n" ""))
+          (insert ".secrets/\n")
+          (append-to-file (point-min) (point-max) gi))))))
+
+(defun rlm-lab--write-env-pair (key value)
+  "Idempotently set KEY=VALUE in .env."
+  (let ((envf (rlm-lab--file ".env")))
+    (unless (file-exists-p envf)
+      (copy-file (rlm-lab--file ".env.example") envf t))
+    (with-temp-buffer
+      (insert-file-contents envf)
+      (if (re-search-forward (concat "^" (regexp-quote key) "=.*$") nil t)
+          (replace-match (concat key "=" value))
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (insert key "=" value "\n"))
+      (write-region (point-min) (point-max) envf nil 'silent))
+    (set-file-modes envf #o600)))
+
+(defun rlm-lab--mask (key line)
+  (if (string-prefix-p (concat key "=") line)
+      (concat key "=<masked>")
+    line))
+
+(let* ((secrets-dir (rlm-lab--file ".secrets/"))
+       (keyfile (expand-file-name "openrouter-key" secrets-dir))
+       (key (read-passwd "OpenRouter API key (paste, then RET): ")))
+  (when (or (null key) (string-empty-p (string-trim key)))
+    (error "empty key, aborting"))
+  (make-directory secrets-dir t)
+  (set-file-modes secrets-dir #o700)
+  (with-temp-file keyfile (insert (string-trim key) "\n"))
+  (set-file-modes keyfile #o600)
+  (rlm-lab--ensure-gitignore-secrets)
+  (rlm-lab--write-env-pair "OPENROUTER_BASE_URL" "https://openrouter.ai/api/v1")
+  (rlm-lab--write-env-pair "OPENROUTER_API_KEY" (string-trim key))
+
+  ;; Optional per-model slugs
+  (let ((slugs (rlm-lab--file "config/openrouter-slugs.env")))
+    (if (file-exists-p slugs)
+        (with-temp-buffer
+          (insert-file-contents slugs)
+          (goto-char (point-min))
+          (while (not (eobp))
+            (let* ((line (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+                   (trim (string-trim line)))
+              (cond
+               ((string-empty-p trim) nil)
+               ((string-prefix-p "#" trim) nil)
+               (t
+                (let ((idx (string-match-p "=" trim)))
+                  (when (and idx (> idx 0))
+                    (let ((k (substring trim 0 idx)) (v (substring trim (1+ idx))))
+                      (when (and (not (string-empty-p k)) (not (string-empty-p v)))
+                        (rlm-lab--write-env-pair k v)
+                        (message "slug set: %s" k)))))))
+              (forward-line 1))))
+      (message "no config/openrouter-slugs.env; per-model slug vars left untouched")))
+
+  ;; Report (masked)
+  (let ((envf (rlm-lab--file ".env")))
+    (princ (concat "OPENROUTER_API_KEY written to .env (length="
+                   (number-to-string (length (string-trim key))) ")\n"))
+    (princ (concat "secret file: " keyfile " (mode 0600)\n\n"))
+    (princ "=== relevant .env entries (keys masked) ===\n")
+    (with-temp-buffer
+      (insert-file-contents envf)
+      (goto-char (point-min))
+      (while (re-search-forward "^\\(OPENROUTER_BASE_URL\\|OPENROUTER_API_KEY\\|QWEN38_FRONTIER_MODEL\\|CLAUDE_FABLE_5_OPENROUTER_MODEL\\|CLAUDE_OPUS_5_OPENROUTER_MODEL\\|GROK_46_OPENROUTER_MODEL\\|GEMINI_37_FLASH_OPENROUTER_MODEL\\)=.*$" nil t)
+        (princ (concat (match-string 0) "\n")))))
+  nil)
+#+end_src
+
+* Phase E3 — OpenRouter dry-run (no spend)
+
+Lists which remote models the bench would select and the planned run count
+without making any API call. Requires the key from Phase E2. Use this to
+confirm slug variables and model selection before paying for a real run.
+
+#+name: openrouter-dry-run
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+. .venv/bin/activate 2>/dev/null || true
+set -a; . ./.env; set +a
+echo "=== remote models enabled in registry ==="
+python3 - <<'PY'
+import tomllib
+with open("config/models.toml","rb") as f:
+    cfg = tomllib.load(f)
+for m in cfg.get("models",[]):
+    if m.get("deployment") == "remote":
+        print(f"  id={m['id']:<22} enabled={m.get('enabled',False)} class={m.get('class')}")
+PY
+echo
+echo "=== dry-run, preset=smoke, deployment=remote, --allow-paid ==="
+./scripts/bench --preset smoke --deployment remote --allow-paid --dry-run
 #+end_src
 
 * Phase F — Check lab environment
@@ -273,6 +476,9 @@ else
     echo "stopped"
 fi
 #+end_src
+
+#+RESULTS: stop-server
+: stopped
 
 * Tangles and notes
 
