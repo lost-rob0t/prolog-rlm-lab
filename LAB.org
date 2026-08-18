@@ -25,6 +25,8 @@ make report
 
 =make findings= and =make report= use =emacsclient= so asynchronous gptel callbacks stay alive in the running Emacs process.
 
+Machine-local llama.cpp launch, GPU verification, OpenRouter configuration, and teardown live in [[file:tasks.org][tasks.org]]. The canonical local endpoint is =127.0.0.1:8000= and the currently registered local provider model is =Qwen3-8B-Q4_K_M=.
+
 * Environment check
 
 #+begin_src sh :async yes
@@ -50,7 +52,7 @@ The intended size lanes are:
 
 Closed API models live in the remote-frontier lane because pretending their hidden parameter counts are known would be benchmark fan-fiction.
 
-For a normal single-model llama.cpp server, run one model id at a time and accumulate sessions in =results/raw=. The examples below use =qwen35-4b=; change =MODEL_ID= for the model currently loaded by llama.cpp.
+For a normal single-model llama.cpp server, run one model id at a time and accumulate sessions in =results/raw=. The default Make model is =qwen3-8b-q4-k-m=, which maps to the actual provider model =Qwen3-8B-Q4_K_M=.
 
 * Demo pipeline
 
@@ -65,13 +67,13 @@ This produces deterministic synthetic rows so the analysis/export stack can be t
 Refuse to create benchmark rows unless the configured llama.cpp endpoint is reachable and advertises the requested model.
 
 #+begin_src sh :async yes
-make doctor MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 80
+make doctor | ./scripts/filter-output --lines 80
 #+end_src
 
 Run exactly one end-to-end row before a larger matrix:
 
 #+begin_src sh :async yes
-make probe MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 100
+make probe | ./scripts/filter-output --lines 100
 #+end_src
 
 * Local smoke benchmark
@@ -79,7 +81,7 @@ make probe MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 100
 Runs the smoke matrix against the selected model only.
 
 #+begin_src sh :async yes
-make smoke MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 100
+make smoke | ./scripts/filter-output --lines 100
 #+end_src
 
 * Recursion sweep
@@ -87,16 +89,18 @@ make smoke MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 100
 This is the important axis. Keep the model fixed and sweep recursion levels before comparing model sizes.
 
 #+begin_src sh :async yes
-make recursion MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 120
+make recursion | ./scripts/filter-output --lines 120
 #+end_src
 
 * Size-class sweep
 
-Run this once for each model currently loaded by the single-model llama.cpp server. Analysis combines the resulting raw sessions.
+Run this once for each exact model currently loaded by the single-model llama.cpp server. Analysis combines the resulting raw sessions.
 
 #+begin_src sh :async yes
-make classes MODEL_ID=qwen35-4b | ./scripts/filter-output --lines 120
+make classes | ./scripts/filter-output --lines 120
 #+end_src
+
+To benchmark another size class, load that exact model and pass its registry id explicitly, for example =make classes MODEL_ID=qwen35-4b=. Do not map a candidate id to different weights just to satisfy preflight.
 
 =make classes-all= exists only for an endpoint that really advertises every enabled local model at once.
 
@@ -190,6 +194,7 @@ The resulting report is [[file:public/index.html][public/index.html]].
 - Keep raw rows. Do not overwrite them to make a chart prettier.
 - Pin model IDs when a provider supports immutable snapshots.
 - Record provider, endpoint class, quantization, context, and decoding settings.
+- Keep the benchmark id distinct from the provider model name, but make both truthful.
 - Treat API aliases as mutable unless the provider explicitly documents them as pinned.
 - Compare recursion curves under the same token and call budgets.
 - Report failures, timeouts, malformed responses, and missing usage metadata rather than silently dropping them.
