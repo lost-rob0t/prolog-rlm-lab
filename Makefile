@@ -24,30 +24,30 @@ probe:
 	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --limit 1
 
 smoke:
-	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
 
 # Explicit causal comparison: base model -> plain agent -> Prolog-RLM + verifier.
 compare:
-	./scripts/bench --preset compare --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/bench --preset compare --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
 
 # Legacy recursion sweep retained for sessions already collected with old labels.
 recursion:
-	./scripts/bench --preset recursion --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/bench --preset recursion --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
 
 classes:
-	./scripts/bench --preset classes --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/bench --preset classes --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
 
 classes-all:
 	@echo "Requires a multi-model/router endpoint that advertises every enabled local model."
-	./scripts/bench --preset classes --deployment local --quiet
+	./scripts/bench --preset classes --deployment local --quiet || test $$? -eq 1
 	./scripts/analyze
 
 starintel:
-	./scripts/bench --preset starintel --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/bench --preset starintel --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
 
 frontier:
@@ -57,7 +57,7 @@ frontier5-dry:
 	./scripts/bench --preset frontier5 --deployment remote --allow-paid --max-cost-usd 4.25 --dry-run $(FRONTIER5_ARGS)
 
 frontier5:
-	./scripts/bench --preset frontier5 --deployment remote --allow-paid --max-cost-usd 4.25 $(FRONTIER5_ARGS)
+	./scripts/bench --preset frontier5 --deployment remote --allow-paid --max-cost-usd 4.25 $(FRONTIER5_ARGS) || test $$? -eq 1
 	./scripts/analyze
 
 # Dynamic OpenRouter free-model lane. list makes no inference request; deep is
