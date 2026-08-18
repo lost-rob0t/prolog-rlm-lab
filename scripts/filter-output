@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import argparse
+import sys
+
+parser = argparse.ArgumentParser(description="Keep Org Babel results readable while preserving useful failure context")
+parser.add_argument("--lines", type=int, default=80)
+parser.add_argument("--head", type=int, default=12)
+parser.add_argument("--width", type=int, default=360)
+args = parser.parse_args()
+
+lines = [line.rstrip("\n")[:args.width] for line in sys.stdin]
+if len(lines) <= args.lines:
+    print("\n".join(lines))
+    raise SystemExit(0)
+head = min(args.head, args.lines // 3)
+tail = max(1, args.lines - head - 1)
+print("\n".join(lines[:head]))
+print(f"... [{len(lines) - head - tail} lines filtered; full benchmark data is under results/] ...")
+print("\n".join(lines[-tail:]))

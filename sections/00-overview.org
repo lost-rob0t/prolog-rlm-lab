@@ -1,0 +1,13 @@
+* Experiment
+
+This report measures how much observable reasoning work can be moved from a language model into a Prolog-backed recursive runtime while preserving task success.
+
+The benchmark is built around capability substitution, not vague claims that symbolic systems somehow contain a percentage of "reasoning." The useful measurements are success, token use, model calls, Prolog calls, latency, cost, recursion depth, and failure behavior.
+
+#+begin_export html
+<div class="callout-grid">
+  <div class="callout"><span class="eyebrow">Primary question</span><strong>How weak can the model become before Prolog-RLM stops compensating?</strong></div>
+  <div class="callout"><span class="eyebrow">Key comparison</span><strong>small + RLM versus large vanilla</strong></div>
+  <div class="callout"><span class="eyebrow">Scaling axis</span><strong>recursion depth and task complexity</strong></div>
+</div>
+#+end_export

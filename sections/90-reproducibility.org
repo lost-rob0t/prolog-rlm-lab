@@ -1,0 +1,5 @@
+* Reproducibility
+
+Raw benchmark rows include the task seed, recursion level, condition, model ID, declared model class, provider, deployment class, token counts when available, and paths to raw traces.
+
+A result without a replayable seed and raw record should be treated as an anecdote wearing a lab coat.

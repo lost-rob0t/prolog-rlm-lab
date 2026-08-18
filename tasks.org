@@ -1,0 +1,289 @@
+#+TITLE: Prolog RLM Lab — Local GPU Inference Tasks
+#+PROPERTY: header-args:shell :prologue "set -euo pipefail\nROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]:-$0}\")\" && pwd)\""
+#+PROPERTY: header-args:shell+ :exports both :results output
+#+PROPERTY: header-args:shell+ :async yes
+#+PROPERTY: header-args:python :exports both :results output
+
+This file orchestrates the local GPU inference stack for the Prolog RLM Lab.
+
+Hardware: AMD Radeon RX 5500 XT (Navi 14 / RDNA1, 8 GiB VRAM).
+Backend: ~llama.cpp~ with the Vulkan backend (~ggml-vulkan~) via the Arch
+=llama-cpp= + =ggml= + =ggml-vulkan= packages. ROCm is not used: Navi 14 is
+not an officially supported ROCm target.
+
+The model served is =Qwen3-8B-Q4_K_M= under the alias =local-model=, bound
+to ~127.0.0.1:8080~ only. ~local-model~ is the alias the lab registry points
+at through =LOCAL_OPENAI_BASE_URL=.
+
+* Phase A — Launch the inference server
+
+This block starts ~llama-server~ in the background, fully offloaded to the
+GPU (~-ngl 99~), 8192-token context, OpenAI-compatible API on
+~127.0.0.1:8080~, alias =local-model=. Logs go to
+=/tmp/llama-server.lab.log=. It is idempotent: a running server on 8080 is
+left alone.
+
+#+name: launch-server
+#+begin_src shell :async yes
+if pgrep -af 'llama-server.*--port 8080' >/dev/null 2>&1; then
+    echo "llama-server already running on 127.0.0.1:8080"
+    pgrep -af 'llama-server.*--port 8080' | head -1
+    exit 0
+fi
+MODEL=/home/unseen/.local/share/models/Qwen3-8B-Q4_K_M.gguf
+LOG=/tmp/llama-server.lab.log
+nohup llama-server \
+    --model "$MODEL" \
+    --alias local-model \
+    --host 127.0.0.1 --port 8080 \
+    --n-gpu-layers 99 \
+    --ctx-size 8192 \
+    --temp 0.7 \
+    --jinja \
+    > "$LOG" 2>&1 < /dev/null &
+disown
+echo "launched llama-server, pid=$!, log=$LOG"
+#+end_src
+
+* Phase B — Wait for readiness
+
+Polls the ~~/health~ endpoint until the server reports ~ok~ or the timeout
+expires. Run this after =launch-server=.
+
+#+name: wait-server
+#+begin_src shell :async yes
+for i in $(seq 1 60); do
+    if curl -fsS http://127.0.0.1:8080/health 2>/dev/null | grep -q '"status":"ok"'; then
+        echo "ready after ${i}s"
+        curl -fsS http://127.0.0.1:8080/health
+        exit 0
+    fi
+    sleep 1
+done
+echo "server not ready after 60s"
+tail -40 /tmp/llama-server.lab.log
+exit 1
+#+end_src
+
+* Phase C — Prove GPU acceleration
+
+Confirms the model is loaded with full GPU offload and reports prompt
+processing and generation tokens/sec via a small =llama-bench= run. The
+device line must show the Radeon RX 5500 XT; if it falls back to CPU only,
+the bench numbers will be an order of magnitude lower and the log should be
+inspected.
+
+#+name: gpu-bench
+#+begin_src shell :async yes
+echo "=== devices reported by server ==="
+curl -fsS http://127.0.0.1:8080/health | python3 -m json.tool 2>/dev/null || true
+echo
+echo "=== llama-bench (pp512 + tg128, 3 runs) ==="
+llama-bench \
+    --model /home/unseen/.local/share/models/Qwen3-8B-Q4_K_M.gguf \
+    -ngl 99 \
+    -p 512 -n 128 \
+    -r 3 \
+    2>&1 | tail -20
+echo
+echo "=== tail of server log (offload confirmation) ==="
+grep -Ei 'ggml_vulkan|device|offload|VRAM|ngl|loaded model|model loaded' /tmp/llama-server.lab.log | tail -15
+#+end_src
+
+* Phase D — API smoke test
+
+Sends a direct OpenAI-compatible chat completion to =local-model= asking
+for the literal string =LOCAL_GPU_OK=. Anything else is a failure.
+
+#+name: api-smoke
+#+begin_src shell :async yes
+curl -fsS http://127.0.0.1:8080/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{
+        "model": "local-model",
+        "messages": [{"role":"user","content":"Reply with exactly LOCAL_GPU_OK"}],
+        "max_tokens": 16,
+        "temperature": 0.0,
+        "stream": false
+    }' \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["choices"][0]["message"]["content"])'
+#+end_src
+
+* Phase E — Configure the lab
+
+Idempotently sets =LOCAL_OPENAI_BASE_URL= in =.env= and adds a
+=local-model= registry entry to =config/models.toml= so the lab's
+~openai_compatible~ provider routes to the running server. Existing entries
+are left untouched; a marker comment guards the injected block so reruns do
+not duplicate it.
+
+#+name: configure-lab
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+
+# .env: set LOCAL_OPENAI_BASE_URL (create file if absent)
+if [ ! -f .env ]; then
+    cp .env.example .env
+fi
+if grep -q '^LOCAL_OPENAI_BASE_URL=' .env; then
+    sed -i 's|^LOCAL_OPENAI_BASE_URL=.*|LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8080/v1|' .env
+else
+    printf 'LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8080/v1\n' >> .env
+fi
+if ! grep -q '^LOCAL_API_KEY=' .env; then
+    printf 'LOCAL_API_KEY=\n' >> .env
+fi
+echo ".env:"
+grep -E '^(LOCAL_OPENAI_BASE_URL|LOCAL_API_KEY)=' .env
+
+# models.toml: add a local-model entry if absent
+MARKER='# local-gpu-task block'
+if ! grep -qF "$MARKER" config/models.toml; then
+    cat >> config/models.toml <<EOF
+
+$MARKER
+[[models]]
+id = "local-model"
+label = "Qwen3-8B Q4_K_M (local GPU)"
+class = "7to12b"
+parameter_b = 8.0
+active_parameter_b = 8.0
+deployment = "local"
+provider = "openai_compatible"
+model = "local-model"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3-8B-GGUF"
+EOF
+    echo "added local-model entry to config/models.toml"
+else
+    echo "local-model entry already present in config/models.toml"
+fi
+tail -16 config/models.toml
+#+end_src
+
+* Phase F — Check lab environment
+
+Runs the lab's own environment check plus a Python import sanity check.
+
+#+name: check-env
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+./scripts/check-env
+echo
+python3 - <<'PY'
+import sys
+try:
+    import matplotlib
+    print(f"matplotlib OK ({matplotlib.__version__})")
+except Exception as exc:
+    print(f"matplotlib MISSING: {exc}", file=sys.stderr)
+PY
+#+end_src
+
+* Phase G — Install Python dependencies (optional)
+
+Creates a local venv and installs =requirements.txt=. Skip if
+=./venv= already exists.
+
+#+name: deps
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+if [ -d .venv ]; then
+    echo ".venv exists, skipping"
+else
+    python3 -m venv .venv
+    . .venv/bin/activate
+    pip install --quiet --upgrade pip
+    pip install --quiet -r requirements.txt
+    echo "installed into .venv"
+fi
+. .venv/bin/activate 2>/dev/null || true
+python3 -c 'import matplotlib; print("matplotlib", matplotlib.__version__)'
+#+end_src
+
+* Phase H — Smoke benchmark against =local-model=
+
+Runs the lab's =smoke= preset against the local GPU server through the
+registry entry created in Phase E. Uses =MODEL_ID=local-model=.
+
+#+name: bench-smoke
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+. .venv/bin/activate 2>/dev/null || true
+MODEL_ID=local-model ./scripts/bench --preset smoke --deployment local --model-id local-model --quiet
+./scripts/analyze
+echo
+echo "=== summary ==="
+ls -la results/summary/ 2>/dev/null
+cat results/summary/metrics.org 2>/dev/null | head -40
+#+end_src
+
+* Phase I — RLM recursion benchmark against =local-model=
+
+The deeper preset exercising recursion levels 1, 2, 4, 8, 16 under
+=self_recursive=, =rlm=, =rlm_verified=. Slower than smoke; run async.
+
+#+name: bench-recursion
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+. .venv/bin/activate 2>/dev/null || true
+MODEL_ID=local-model ./scripts/bench --preset recursion --deployment local --model-id local-model --quiet
+./scripts/analyze
+echo
+echo "=== summary ==="
+ls -la results/summary/ 2>/dev/null
+cat results/summary/metrics.org 2>/dev/null | head -60
+#+end_src
+
+* Phase J — Export HTML report
+
+Rebuilds =public/index.html= from =REPORT.org= via the lab's batch export
+helper. Requires Emacs.
+
+#+name: export-report
+#+begin_src shell :async yes
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+cd "$ROOT"
+./scripts/export
+echo
+ls -la public/index.html
+#+end_src
+
+* Phase K — Stop the inference server
+
+Cleanly terminates the =llama-server= process spawned in Phase A. Use this
+to release VRAM when the lab work is done.
+
+#+name: stop-server
+#+begin_src shell :async yes
+pkill -TERM -f 'llama-server.*--port 8080' 2>/dev/null || true
+sleep 2
+if pgrep -af 'llama-server.*--port 8080' >/dev/null 2>&1; then
+    echo "still running, sending KILL"
+    pkill -KILL -f 'llama-server.*--port 8080' 2>/dev/null || true
+else
+    echo "stopped"
+fi
+#+end_src
+
+* Tangles and notes
+
+- All ~shell~ blocks are ~:async yes~ so ~ob-async~ dispatches them to a
+  background buffer. Without ~ob-async~, they still run synchronously.
+- Phases A → D prove the GPU stack. Phase E wires the stack into the lab.
+  Phases F → I run real lab work. Phase J exports. Phase K tears down.
+- The =local-model= alias is stable; the lab registry uses the same string
+  in =config/models.toml= (~model = "local-model"~) and the =--model-id=
+  passed to =scripts/bench=.
+- =llama-server= binds to ~127.0.0.1~ only; no port is exposed externally.
+- The =configure-lab= block is idempotent and guarded by a marker comment,
+  so it is safe to re-run.
+#+end_src

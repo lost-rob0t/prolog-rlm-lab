@@ -1,0 +1,12 @@
+#+TITLE: Prolog RLM Capability Substitution Report
+#+SUBTITLE: Symbolic recursion vs transformer compute
+#+OPTIONS: toc:3 num:nil
+#+LANGUAGE: en
+
+#+INCLUDE: "sections/00-overview.org"
+#+INCLUDE: "sections/10-method.org"
+#+INCLUDE: "sections/20-models.org"
+#+INCLUDE: "results/summary/metrics.org"
+#+INCLUDE: "results/summary/plots.org"
+#+INCLUDE: "FINDINGS.org"
+#+INCLUDE: "sections/90-reproducibility.org"

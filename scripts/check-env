@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -u
+printf '%-18s %s\n' "python3" "$(command -v python3 || echo MISSING)"
+printf '%-18s %s\n' "swipl" "$(command -v swipl || echo MISSING)"
+printf '%-18s %s\n' "emacs" "$(command -v emacs || echo MISSING)"
+printf '%-18s %s\n' "curl" "$(command -v curl || echo MISSING)"
+python3 - <<'PY'
+try:
+    import matplotlib
+    print(f"{'matplotlib':18} {matplotlib.__version__}")
+except Exception as exc:
+    print(f"{'matplotlib':18} MISSING ({exc})")
+PY

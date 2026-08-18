@@ -1,0 +1,124 @@
+#+TITLE: Prolog RLM Lab
+#+SUBTITLE: Measure how much model capability symbolic recursion can replace
+#+AUTHOR: N545PY
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+A local-first, provider-agnostic Org-mode benchmark lab for measuring Prolog-RLM reasoning offload.
+
+The benchmark varies:
+
+- model capability class,
+- model/provider,
+- task family and difficulty,
+- recursion depth,
+- execution condition (vanilla, self-recursive, RLM, RLM+verification),
+- token budget and trial seed.
+
+The important outputs are not merely accuracy. The lab records model calls, Prolog calls, input/output tokens, latency, symbolic-runtime time, failures, and optional API cost. It then generates plots and a polished HTML report.
+
+* Safety against accidental API spend
+
+Remote models are disabled by default. Enabling an API lane requires both:
+
+1. setting the matching API key/environment variables, and
+2. explicitly requesting remote models on the benchmark command line.
+
+The harness never silently falls back from local inference to a paid endpoint.
+
+* Quick start
+
+#+begin_src sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+make demo
+make export
+#+end_src
+
+Then open =public/index.html=.
+
+For real inference, point =LOCAL_OPENAI_BASE_URL= at an OpenAI-compatible local server (vLLM, llama.cpp server, SGLang, etc.), configure model aliases in =config/models.toml=, then run:
+
+#+begin_src sh
+make smoke
+#+end_src
+
+The full Org notebook is =LAB.org=.
+
+* Current model-class snapshot
+
+The shipped model registry is a *benchmark candidate snapshot*, not a permanent claim that one vendor will remain best forever.
+
+Open-weight size classes are seeded with current Qwen-family candidates because the current official collections expose clean parameter-scale coverage from sub-1B through frontier MoE. The registry also has a separate remote-frontier lane for closed models whose parameter counts are not public.
+
+Edit =config/models.toml= as the model landscape changes. The analysis groups by declared class rather than hard-coding model names.
+
+* Requirements
+
+- Python 3.11+
+- SWI-Prolog
+- Emacs 29+ recommended
+- Org mode
+- =ob-async= for asynchronous Babel blocks
+- =gptel= for generated findings
+- matplotlib
+
+* Layout
+
+#+begin_example
+LAB.org                    interactive benchmark notebook
+REPORT.org                 HTML report assembly via #+INCLUDE
+FINDINGS.org               generated analysis narrative
+config/models.toml         model registry
+config/experiment.toml     benchmark matrix
+src/bench.py               runner
+src/tasks.py               deterministic task generators
+src/providers.py           local/OpenAI-compatible providers
+src/rlm.py                 recursive symbolic tool loop
+src/analyze.py             summaries and Org tables
+src/plots.py               SVG plot generation
+src/prolog/oracle.pl       safe symbolic query helper
+emacs/rlm-lab.el           Org/gptel/export helpers
+emacs/batch-export.el      batch HTML export
+assets/report.css          report theme
+assets/report.js           report interaction
+results/                   raw data, summaries, plots, logs
+public/index.html          generated report
+#+end_example
+
+* Core metric definitions
+
+** Capability Replacement Ratio (CRR)
+
+For a target success threshold T:
+
+#+begin_example
+CRR = smallest vanilla parameter count reaching T
+      --------------------------------------------
+      smallest RLM parameter count reaching T
+#+end_example
+
+** Token Offload Ratio (TOR)
+
+#+begin_example
+TOR = 1 - (RLM model tokens / vanilla model tokens)
+#+end_example
+
+** Symbolic Work Share (SWS)
+
+A descriptive execution metric, not a claim about consciousness or hidden reasoning:
+
+#+begin_example
+SWS = prolog_calls / (prolog_calls + model_calls)
+#+end_example
+
+This is useful for comparing how much of the *observable control loop* moves into the symbolic runtime.
+
+* Experimental fairness
+
+The task generator owns one symbolic world. Both vanilla and RLM conditions receive the same task information. The RLM condition additionally receives access to general symbolic query machinery, not task-specific answer predicates hand-written per instance.
+
+Every run stores a seed and a raw record. Do not trust a benchmark result that cannot be replayed.

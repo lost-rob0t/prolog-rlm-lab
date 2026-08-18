@@ -1,0 +1,29 @@
+* Findings
+
+#+begin_quote
+No findings have been generated yet. Run the analysis pipeline, then execute =rlm-lab-generate-findings= from =LAB.org=.
+#+end_quote
+
+** Capability substitution
+
+Pending evidence.
+
+** Recursion behavior
+
+Pending evidence.
+
+** Symbolic offload
+
+Pending evidence.
+
+** Failure modes
+
+Pending evidence.
+
+** Cost and latency
+
+Pending evidence.
+
+** Caveats
+
+Pending evidence.

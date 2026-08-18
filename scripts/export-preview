@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+python3 - "$ROOT" "$TMP/report.org" <<'PY'
+from pathlib import Path
+import re
+import sys
+root = Path(sys.argv[1])
+out = Path(sys.argv[2])
+include_re = re.compile(r'^#\+INCLUDE:\s+"([^"]+)"', re.I)
+
+def expand(path: Path, seen=()):
+    text=[]
+    for line in path.read_text(encoding='utf-8').splitlines(True):
+        m=include_re.match(line)
+        if m:
+            target=(path.parent/m.group(1)).resolve()
+            if target in seen:
+                raise RuntimeError(f'include cycle: {target}')
+            text.append(expand(target, seen+(target,)))
+        else:
+            text.append(line)
+    return ''.join(text)
+
+out.write_text(expand(root/'REPORT.org'), encoding='utf-8')
+PY
+cat > "$TMP/head.html" <<EOF2
+<style>
+$(cat "$ROOT/assets/report.css")
+</style>
+<script>
+$(cat "$ROOT/assets/report.js")
+</script>
+EOF2
+mkdir -p "$ROOT/public/results"
+rm -rf "$ROOT/public/results/plots"
+cp -a "$ROOT/results/plots" "$ROOT/public/results/plots"
+pandoc "$TMP/report.org" -f org -t html5 -s --include-in-header="$TMP/head.html" -o "$ROOT/public/index.html"
+printf 'preview exported: public/index.html\n'

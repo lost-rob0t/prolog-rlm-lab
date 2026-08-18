@@ -1,0 +1,64 @@
+* Graphs
+
+The report generates one SVG per core metric so the plots remain sharp when zoomed or printed.
+
+** Accuracy Vs Parameters
+
+[[file:results/plots/accuracy-vs-parameters.svg]]
+
+** Accuracy Vs Tokens
+
+[[file:results/plots/accuracy-vs-tokens.svg]]
+
+** Cost Per Success
+
+[[file:results/plots/cost-per-success.svg]]
+
+** Failure Rate
+
+[[file:results/plots/failure-rate.svg]]
+
+** Latency By Recursion
+
+[[file:results/plots/latency-by-recursion.svg]]
+
+** Model Calls By Recursion
+
+[[file:results/plots/model-calls-by-recursion.svg]]
+
+** Pareto
+
+[[file:results/plots/pareto.svg]]
+
+** Prolog Calls By Recursion
+
+[[file:results/plots/prolog-calls-by-recursion.svg]]
+
+** Success By Family
+
+[[file:results/plots/success-by-family.svg]]
+
+** Success By Model
+
+[[file:results/plots/success-by-model.svg]]
+
+** Success By Recursion
+
+[[file:results/plots/success-by-recursion.svg]]
+
+** Symbolic Work Share
+
+[[file:results/plots/symbolic-work-share.svg]]
+
+** Task Family Heatmap
+
+[[file:results/plots/task-family-heatmap.svg]]
+
+** Token Offload Ratio
+
+[[file:results/plots/token-offload-ratio.svg]]
+
+** Tokens By Recursion
+
+[[file:results/plots/tokens-by-recursion.svg]]
+

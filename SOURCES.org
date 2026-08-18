@@ -1,0 +1,32 @@
+#+TITLE: Model Registry Source Notes
+#+OPTIONS: toc:nil num:nil
+
+* Snapshot date
+
+2026-08-18.
+
+* Open-weight size candidates
+
+The Qwen official Hugging Face collections were used to seed parameter classes because they provide explicit model sizes across the range required by the experiment.
+
+- Qwen3.5 collection: https://huggingface.co/collections/Qwen/qwen35
+- Qwen3.8 collection: https://huggingface.co/collections/Qwen/qwen38
+
+At the snapshot date, the Qwen3.5 collection lists 0.8B, 2B, 4B, 9B, 27B, 35B-A3B, 122B-A10B, and 397B-A17B variants. Qwen3.8 lists a 27B model and a 2.4T-A95B model. The lab uses these as scale-lane candidates, not as an eternal assertion that no competing model is stronger.
+
+* Remote frontier candidates
+
+- Anthropic model overview: https://platform.claude.com/docs/en/about-claude/models/overview
+- Google Gemini model list: https://ai.google.dev/gemini-api/docs/models
+- xAI model list: https://docs.x.ai/developers/models
+
+Anthropic's current documentation identifies Claude Fable 5 as its highest-capability widely released model and also lists Claude Opus 5. Google's current model list includes Gemini 3.7 Flash. xAI's current docs recommend Grok 4.6 for code and general workloads.
+
+Closed-model parameter counts are deliberately not guessed. They remain in the =remote-frontier= class.
+
+* gptel / Org async references
+
+- gptel: https://github.com/karthink/gptel
+- ob-async: https://github.com/astahlman/ob-async
+
+The current gptel request API is asynchronous and accepts a two-argument callback =(response info)=. The lab uses that API to write =FINDINGS.org= without blocking Emacs.

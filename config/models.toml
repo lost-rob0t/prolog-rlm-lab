@@ -1,0 +1,204 @@
+# Model registry snapshot: 2026-08-18.
+# "candidate" means benchmark candidate for the class, not an eternal SOTA claim.
+# Remote entries are disabled unless --allow-paid is supplied.
+
+[[models]]
+id = "qwen35-08b"
+label = "Qwen3.5 0.8B"
+class = "sub1b"
+parameter_b = 0.8
+active_parameter_b = 0.8
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-0.8B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-0.8B"
+
+[[models]]
+id = "qwen35-2b"
+label = "Qwen3.5 2B"
+class = "1to3b"
+parameter_b = 2.0
+active_parameter_b = 2.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-2B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-2B"
+
+[[models]]
+id = "qwen35-4b"
+label = "Qwen3.5 4B"
+class = "3to6b"
+parameter_b = 4.0
+active_parameter_b = 4.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-4B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-4B"
+
+[[models]]
+id = "qwen35-9b"
+label = "Qwen3.5 9B"
+class = "7to12b"
+parameter_b = 9.0
+active_parameter_b = 9.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-9B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-9B"
+
+[[models]]
+id = "qwen38-27b"
+label = "Qwen3.8 27B"
+class = "20to30b-dense"
+parameter_b = 27.0
+active_parameter_b = 27.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.8-27B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = true
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.8-27B"
+
+[[models]]
+id = "qwen35-35b-a3b"
+label = "Qwen3.5 35B-A3B"
+class = "efficient-moe"
+parameter_b = 35.0
+active_parameter_b = 3.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-35B-A3B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = false
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-35B-A3B"
+
+[[models]]
+id = "qwen35-122b-a10b"
+label = "Qwen3.5 122B-A10B"
+class = "large-moe"
+parameter_b = 122.0
+active_parameter_b = 10.0
+deployment = "local"
+provider = "openai_compatible"
+model = "Qwen/Qwen3.5-122B-A10B"
+base_url_env = "LOCAL_OPENAI_BASE_URL"
+api_key_env = "LOCAL_API_KEY"
+enabled = false
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
+
+[[models]]
+id = "qwen38-24t-a95b"
+label = "Qwen3.8 2.4T-A95B"
+class = "frontier-open-weight"
+parameter_b = 2400.0
+active_parameter_b = 95.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "QWEN38_FRONTIER_MODEL"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+source = "https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B"
+
+[[models]]
+id = "claude-fable-5"
+label = "Claude Fable 5"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "CLAUDE_FABLE_5_OPENROUTER_MODEL"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+input_cost_per_million = 10.0
+output_cost_per_million = 50.0
+source = "https://platform.claude.com/docs/en/about-claude/models/overview"
+
+[[models]]
+id = "claude-opus-5"
+label = "Claude Opus 5"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "CLAUDE_OPUS_5_OPENROUTER_MODEL"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+input_cost_per_million = 5.0
+output_cost_per_million = 25.0
+source = "https://platform.claude.com/docs/en/about-claude/models/overview"
+
+[[models]]
+id = "grok-46"
+label = "Grok 4.6"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "GROK_46_OPENROUTER_MODEL"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+input_cost_per_million = 2.0
+output_cost_per_million = 6.0
+source = "https://docs.x.ai/developers/models"
+
+[[models]]
+id = "gemini-37-flash"
+label = "Gemini 3.7 Flash"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "GEMINI_37_FLASH_OPENROUTER_MODEL"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+source = "https://ai.google.dev/gemini-api/docs/models"
+
+[[models]]
+id = "openai-frontier"
+label = "OpenAI frontier (user-selected)"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model_env = "OPENAI_FRONTIER_MODEL"
+base_url_env = "OPENAI_BASE_URL"
+api_key_env = "OPENAI_API_KEY"
+enabled = false
+candidate = false
+source = "user-configured"

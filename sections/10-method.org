@@ -1,0 +1,22 @@
+* Method
+
+** Conditions
+
+| Condition | Model recursion | Prolog queries | Final verification |
+|-----------+-----------------+----------------+--------------------|
+| vanilla | no | no | no |
+| self_recursive | yes | no | no |
+| rlm | yes | yes | no |
+| rlm_verified | yes | yes | yes |
+
+** Task families
+
+The default suite contains recursive reachability, constrained assignment, state tracking, and authorization tasks. Each instance is generated from a deterministic seed and has machine-checkable ground truth.
+
+** Recursion sweep
+
+The default recursion levels are 1, 2, 4, 8, and 16. The runner treats recursion depth as an experimental variable rather than an implementation detail.
+
+** Output discipline
+
+Full request/response traces are written to =results/raw/= and =results/logs/=. Org blocks receive concise summaries so a 6,000-run experiment does not turn the notebook into sedimentary rock.

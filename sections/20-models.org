@@ -1,0 +1,9 @@
+* Model classes
+
+The benchmark registry separates open-weight parameter classes from closed remote-frontier models.
+
+The shipped open-weight candidates are a dated snapshot chosen to provide clean scale coverage. They are not immortal declarations of supremacy. Replace candidates as stronger models appear while retaining the class labels, so historical comparisons remain meaningful.
+
+Closed models are not assigned fictional parameter counts. They are compared as a separate frontier lane.
+
+See [[file:config/models.toml][config/models.toml]] for the exact registry used by a run.
