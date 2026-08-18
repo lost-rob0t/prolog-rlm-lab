@@ -12,6 +12,9 @@ from tasks import make_task
 from util import ROOT, append_jsonl, load_dotenv, now_iso, stable_id, write_json
 
 
+SINGLE_CALL_CONDITIONS = {"base", "vanilla"}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prolog-RLM capability substitution benchmark")
     parser.add_argument("--preset", default="smoke")
@@ -81,31 +84,43 @@ def select_models(models: list[ModelSpec], args: argparse.Namespace) -> list[Mod
 def build_combinations(
     selected: list[ModelSpec], matrix: dict[str, Any], *, interleave_models: bool
 ) -> list[tuple[ModelSpec, str, str, int, str, int, int]]:
+    recursion_levels = matrix["recursion_levels"]
+    if not recursion_levels:
+        return []
+    first_recursion = recursion_levels[0]
+
+    rows: list[tuple[ModelSpec, str, str, int, str, int, int]] = []
     if not interleave_models:
-        return list(
+        rows = list(
             itertools.product(
                 selected,
                 matrix["families"],
                 matrix["difficulties"],
                 range(matrix["instances"]),
                 matrix["conditions"],
-                matrix["recursion_levels"],
+                recursion_levels,
                 range(matrix["trials"]),
             )
         )
+    else:
+        for family, difficulty, instance, condition, recursion, trial, model in itertools.product(
+            matrix["families"],
+            matrix["difficulties"],
+            range(matrix["instances"]),
+            matrix["conditions"],
+            recursion_levels,
+            range(matrix["trials"]),
+            selected,
+        ):
+            rows.append((model, family, difficulty, instance, condition, recursion, trial))
 
-    rows: list[tuple[ModelSpec, str, str, int, str, int, int]] = []
-    for family, difficulty, instance, condition, recursion, trial, model in itertools.product(
-        matrix["families"],
-        matrix["difficulties"],
-        range(matrix["instances"]),
-        matrix["conditions"],
-        matrix["recursion_levels"],
-        range(matrix["trials"]),
-        selected,
-    ):
-        rows.append((model, family, difficulty, instance, condition, recursion, trial))
-    return rows
+    # A one-shot base model has no recursion axis. Repeating it at r=2/4/8/etc.
+    # only duplicates identical work, biases aggregates, and wastes paid calls.
+    return [
+        row
+        for row in rows
+        if row[4] not in SINGLE_CALL_CONDITIONS or row[5] == first_recursion
+    ]
 
 
 def preflight_models(models: list[ModelSpec], timeout_s: int) -> bool:
@@ -183,6 +198,7 @@ def main() -> int:
 
     successes = 0
     failures = 0
+    runtime_errors = 0
     completed_runs = 0
     stopped_reason = ""
     started = time.perf_counter()
@@ -210,6 +226,7 @@ def main() -> int:
             print("cost fuse stopped the matrix before another paid request")
             break
 
+        runtime_errors += int(bool(trace.error))
         ok = not trace.error and correct(trace.answer, task.expected)
         successes += int(ok)
         failures += int(not ok)
@@ -270,6 +287,7 @@ def main() -> int:
         "completed_runs": completed_runs,
         "successes": successes,
         "failures": failures,
+        "runtime_errors": runtime_errors,
         "elapsed_s": round(elapsed, 3),
         "cost_spent_usd": round(budget.spent_usd, 8) if budget else 0.0,
         "stopped_reason": stopped_reason or None,
@@ -278,14 +296,16 @@ def main() -> int:
     write_json(manifest_path, manifest)
     print(
         f"session={session_id} runs={completed_runs}/{len(combinations)} "
-        f"pass={successes} fail={failures} elapsed={elapsed:.1f}s"
+        f"pass={successes} fail={failures} errors={runtime_errors} elapsed={elapsed:.1f}s"
     )
     if budget:
         print(f"spend=${budget.spent_usd:.4f}/${budget.limit_usd:.2f}")
     print(f"raw={out_path.relative_to(ROOT)}")
     if stopped_reason:
         return 4
-    return 0 if failures == 0 else 1
+    if runtime_errors:
+        return 5
+    return 0
 
 
 if __name__ == "__main__":
