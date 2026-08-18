@@ -15,6 +15,7 @@ class Completion:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: float = 0.0
+    cost_usd: float = 0.0
     raw: dict[str, Any] | None = None
 
 
@@ -91,10 +92,64 @@ class ProviderError(RuntimeError):
     pass
 
 
+class BudgetExceeded(ProviderError):
+    pass
+
+
+@dataclass
+class CostBudget:
+    limit_usd: float
+    spent_usd: float = 0.0
+    input_guard_multiplier: float = 2.0
+
+    def ensure_can_call(
+        self,
+        spec: ModelSpec,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int,
+    ) -> float:
+        if spec.input_cost_per_million <= 0 or spec.output_cost_per_million <= 0:
+            raise BudgetExceeded(
+                f"COST_BUDGET_EXCEEDED: pricing metadata missing for {spec.id}; "
+                "refusing a paid request under a hard budget"
+            )
+
+        # The exact remote tokenizer is provider-specific. Use serialized message
+        # characters as a deliberately conservative token proxy, doubled to cover
+        # chat-template/provider overhead. max_tokens is already a hard output cap.
+        serialized = json.dumps(messages, ensure_ascii=True, separators=(",", ":"))
+        guarded_input_tokens = max(256, int(len(serialized) * self.input_guard_multiplier))
+        upper_bound = spec.cost(guarded_input_tokens, max_tokens)
+        if self.spent_usd + upper_bound > self.limit_usd:
+            remaining = max(0.0, self.limit_usd - self.spent_usd)
+            raise BudgetExceeded(
+                "COST_BUDGET_EXCEEDED: next request could cost up to "
+                f"${upper_bound:.4f}, only ${remaining:.4f} remains of "
+                f"${self.limit_usd:.2f} budget"
+            )
+        return upper_bound
+
+    def record(self, amount_usd: float) -> None:
+        amount = max(0.0, float(amount_usd))
+        self.spent_usd += amount
+        if self.spent_usd > self.limit_usd:
+            raise BudgetExceeded(
+                "COST_BUDGET_EXCEEDED: provider-reported spend reached "
+                f"${self.spent_usd:.4f} over ${self.limit_usd:.2f} budget"
+            )
+
+
 class OpenAICompatibleProvider:
-    def __init__(self, spec: ModelSpec, timeout_s: int = 180):
+    def __init__(
+        self,
+        spec: ModelSpec,
+        timeout_s: int = 180,
+        budget: CostBudget | None = None,
+    ):
         self.spec = spec
         self.timeout_s = timeout_s
+        self.budget = budget
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -178,6 +233,9 @@ class OpenAICompatibleProvider:
         if not self.spec.base_url:
             raise ProviderError(f"base URL is not configured for {self.spec.id}")
 
+        if self.budget is not None:
+            self.budget.ensure_can_call(self.spec, messages, max_tokens=max_tokens)
+
         url = self.spec.base_url + "/chat/completions"
         payload = {
             "model": self.spec.model,
@@ -197,11 +255,24 @@ class OpenAICompatibleProvider:
             text = data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(f"unexpected response shape: {str(data)[:2000]}") from exc
+
         usage = data.get("usage") or {}
+        input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+        output_tokens = int(usage.get("completion_tokens", 0) or 0)
+        provider_cost = usage.get("cost")
+        try:
+            cost_usd = float(provider_cost) if provider_cost is not None else self.spec.cost(input_tokens, output_tokens)
+        except (TypeError, ValueError):
+            cost_usd = self.spec.cost(input_tokens, output_tokens)
+
+        if self.budget is not None:
+            self.budget.record(cost_usd)
+
         return Completion(
             text=text,
-            input_tokens=int(usage.get("prompt_tokens", 0) or 0),
-            output_tokens=int(usage.get("completion_tokens", 0) or 0),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             latency_ms=latency_ms,
+            cost_usd=cost_usd,
             raw=data,
         )
