@@ -1,0 +1,2 @@
+# Official SWE-bench harness. Kept separate from the core lab environment.
+swebench==4.0.4
