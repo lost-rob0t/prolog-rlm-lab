@@ -1,6 +1,6 @@
 MODEL_ID ?= qwen35-4b
 
-.PHONY: demo doctor probe smoke recursion classes frontier analyze export test clean clean-demo
+.PHONY: demo doctor probe smoke recursion classes classes-all frontier analyze export test clean clean-demo
 
 demo:
 	./scripts/demo
@@ -20,6 +20,11 @@ recursion:
 	./scripts/analyze
 
 classes:
+	./scripts/bench --preset classes --deployment local --model-id $(MODEL_ID) --quiet
+	./scripts/analyze
+
+classes-all:
+	@echo "Requires a multi-model/router endpoint that advertises every enabled local model."
 	./scripts/bench --preset classes --deployment local --quiet
 	./scripts/analyze
 
