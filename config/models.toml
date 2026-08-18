@@ -1,6 +1,8 @@
 # Model registry snapshot: 2026-08-18.
 # "candidate" means benchmark candidate for the class, not an eternal SOTA claim.
 # Remote entries are disabled unless --allow-paid is supplied.
+# Price fields are USD per million input/output tokens and are used by the
+# application-side spend fuse. Reconcile them before expensive runs.
 #
 # The machine-local llama.cpp server is a single-model endpoint on port 8000.
 # Its advertised model name is kept literal so result metadata says what was
@@ -145,6 +147,10 @@ enabled = false
 candidate = true
 source = "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
 
+# Remote frontier lanes. Defaults are exact OpenRouter model ids; env vars can
+# override them if a provider alias changes. frontier5 deliberately excludes
+# the more expensive Fable lane.
+
 [[models]]
 id = "qwen35-397b-a17b"
 label = "Qwen3.5 397B-A17B"
@@ -153,31 +159,73 @@ parameter_b = 397.0
 active_parameter_b = 17.0
 deployment = "remote"
 provider = "openai_compatible"
+model = "qwen/qwen3.5-397b-a17b"
 model_env = "QWEN35_FRONTIER_MODEL"
 base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
 candidate = true
-source = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B"
+input_cost_per_million = 0.385
+output_cost_per_million = 2.45
+source = "https://openrouter.ai/qwen/qwen3.5-397b-a17b"
 
 [[models]]
-id = "claude-fable-5"
-label = "Claude Fable 5"
+id = "gemini-3-flash"
+label = "Gemini 3 Flash Preview"
 class = "remote-frontier"
 parameter_b = 0.0
 active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
-model_env = "CLAUDE_FABLE_5_OPENROUTER_MODEL"
+model = "google/gemini-3-flash-preview"
+model_env = "GEMINI_3_FLASH_OPENROUTER_MODEL"
 base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
 candidate = true
-input_cost_per_million = 10.0
-output_cost_per_million = 50.0
-source = "https://platform.claude.com/docs/en/about-claude/models/overview"
+input_cost_per_million = 0.5
+output_cost_per_million = 3.0
+source = "https://openrouter.ai/google/gemini-3-flash-preview"
+
+[[models]]
+id = "grok-45"
+label = "Grok 4.5"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model = "x-ai/grok-4.5"
+model_env = "GROK_45_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+input_cost_per_million = 2.0
+output_cost_per_million = 6.0
+source = "https://openrouter.ai/x-ai/grok-4.5"
+
+[[models]]
+id = "gpt56-sol"
+label = "GPT-5.6 Sol"
+class = "remote-frontier"
+parameter_b = 0.0
+active_parameter_b = 0.0
+deployment = "remote"
+provider = "openai_compatible"
+model = "openai/gpt-5.6-sol"
+model_env = "GPT56_SOL_OPENROUTER_MODEL"
+base_url = "https://openrouter.ai/api/v1"
+base_url_env = "OPENROUTER_BASE_URL"
+api_key_env = "OPENROUTER_API_KEY"
+enabled = false
+candidate = true
+input_cost_per_million = 5.0
+output_cost_per_million = 30.0
+source = "https://openrouter.ai/openai/gpt-5.6-sol"
 
 [[models]]
 id = "claude-opus-5"
@@ -187,6 +235,7 @@ parameter_b = 0.0
 active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
+model = "anthropic/claude-opus-5"
 model_env = "CLAUDE_OPUS_5_OPENROUTER_MODEL"
 base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
@@ -195,45 +244,30 @@ enabled = false
 candidate = true
 input_cost_per_million = 5.0
 output_cost_per_million = 25.0
-source = "https://platform.claude.com/docs/en/about-claude/models/overview"
+source = "https://openrouter.ai/anthropic/claude-opus-5"
 
 [[models]]
-id = "grok-46"
-label = "Grok 4.6"
+id = "claude-fable-5"
+label = "Claude Fable 5"
 class = "remote-frontier"
 parameter_b = 0.0
 active_parameter_b = 0.0
 deployment = "remote"
 provider = "openai_compatible"
-model_env = "GROK_46_OPENROUTER_MODEL"
+model = "anthropic/claude-fable-5"
+model_env = "CLAUDE_FABLE_5_OPENROUTER_MODEL"
 base_url = "https://openrouter.ai/api/v1"
 base_url_env = "OPENROUTER_BASE_URL"
 api_key_env = "OPENROUTER_API_KEY"
 enabled = false
 candidate = true
-input_cost_per_million = 2.0
-output_cost_per_million = 6.0
-source = "https://docs.x.ai/developers/models"
-
-[[models]]
-id = "gemini-37-flash"
-label = "Gemini 3.7 Flash"
-class = "remote-frontier"
-parameter_b = 0.0
-active_parameter_b = 0.0
-deployment = "remote"
-provider = "openai_compatible"
-model_env = "GEMINI_37_FLASH_OPENROUTER_MODEL"
-base_url = "https://openrouter.ai/api/v1"
-base_url_env = "OPENROUTER_BASE_URL"
-api_key_env = "OPENROUTER_API_KEY"
-enabled = false
-candidate = true
-source = "https://ai.google.dev/gemini-api/docs/models"
+input_cost_per_million = 10.0
+output_cost_per_million = 50.0
+source = "https://openrouter.ai/anthropic/claude-fable-5"
 
 [[models]]
 id = "openai-frontier"
-label = "OpenAI frontier (user-selected)"
+label = "OpenAI frontier (user-selected direct endpoint)"
 class = "remote-frontier"
 parameter_b = 0.0
 active_parameter_b = 0.0
