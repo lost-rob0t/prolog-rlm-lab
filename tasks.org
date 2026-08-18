@@ -30,6 +30,7 @@ PORT=8000
 MODEL="$HOME/.local/share/models/Qwen3-8B-Q4_K_M.gguf"
 PROVIDER_MODEL='Qwen3-8B-Q4_K_M'
 LOG=/tmp/llama-server.lab.log
+MODELS_JSON=/tmp/rlm-lab-models.json
 
 for pkg in llama-cpp ggml ggml-cpu ggml-vulkan; do
     if ! pacman -Qi "$pkg" >/dev/null 2>&1; then
@@ -44,11 +45,12 @@ if [ ! -r "$MODEL" ]; then
     exit 1
 fi
 
-if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/tmp/rlm-lab-models.json 2>/dev/null; then
-    if python3 - "$PROVIDER_MODEL" </tmp/rlm-lab-models.json <<'PY'
+if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >"$MODELS_JSON" 2>/dev/null; then
+    if python3 - "$PROVIDER_MODEL" "$MODELS_JSON" <<'PY'
 import json, sys
-wanted = sys.argv[1]
-data = json.load(sys.stdin)
+wanted, path = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
 ids = [row.get("id") for row in data.get("data", [])]
 print("advertised:", ", ".join(str(x) for x in ids))
 raise SystemExit(0 if wanted in ids else 1)
@@ -84,14 +86,16 @@ echo "log=$LOG"
 set -euo pipefail
 PORT=8000
 PROVIDER_MODEL='Qwen3-8B-Q4_K_M'
+MODELS_JSON=/tmp/rlm-lab-models.json
 
 for i in $(seq 1 60); do
     if curl -fsS "http://127.0.0.1:${PORT}/health" 2>/dev/null | grep -q '"status":"ok"'; then
-        MODELS="$(curl -fsS "http://127.0.0.1:${PORT}/v1/models")"
-        printf '%s' "$MODELS" | python3 - "$PROVIDER_MODEL" <<'PY'
+        curl -fsS "http://127.0.0.1:${PORT}/v1/models" >"$MODELS_JSON"
+        python3 - "$PROVIDER_MODEL" "$MODELS_JSON" <<'PY'
 import json, sys
-wanted = sys.argv[1]
-data = json.load(sys.stdin)
+wanted, path = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
 ids = [row.get("id") for row in data.get("data", [])]
 print("models:", ", ".join(str(x) for x in ids))
 if wanted not in ids:
