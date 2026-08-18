@@ -42,3 +42,16 @@ instances_per_difficulty = 3
 difficulties = ["hard"]
 recursion_levels = [1, 4, 8]
 conditions = ["vanilla", "rlm_verified"]
+
+# Paid comparison designed for a hard application-side spend fuse.
+# Five selected frontier models -> 64 rows/model, 320 rows total.
+# At recursion 1/2 this is at most 80 model calls/model (400 total), with
+# max output reduced to 256 tokens. The Make target uses a $4.25 fuse to
+# leave headroom below the user's absolute $5 budget.
+[presets.frontier5]
+trials = 1
+instances_per_difficulty = 2
+difficulties = ["medium", "hard"]
+recursion_levels = [1, 2]
+conditions = ["vanilla", "rlm_verified"]
+max_output_tokens = 256
