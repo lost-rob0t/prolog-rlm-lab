@@ -1,6 +1,8 @@
 MODEL_ID ?= qwen35-4b
+EMACSCLIENT ?= emacsclient
 
-.PHONY: demo doctor probe smoke recursion classes classes-all frontier analyze export test clean clean-demo
+.PHONY: demo doctor probe smoke recursion classes classes-all frontier analyze export \
+	emacs-check lab findings report test clean clean-demo
 
 demo:
 	./scripts/demo
@@ -36,6 +38,18 @@ analyze:
 
 export:
 	./scripts/export
+
+emacs-check:
+	@$(EMACSCLIENT) --eval '(list :emacs emacs-version :gptel (and (require (quote gptel-request) nil t) t) :ob-async (and (require (quote ob-async) nil t) t))'
+
+lab:
+	$(EMACSCLIENT) -n "$(CURDIR)/LAB.org"
+
+findings:
+	$(EMACSCLIENT) --eval '(progn (load-file "$(CURDIR)/emacs/rlm-lab.el") (rlm-lab-generate-findings) "FINDINGS.org generation dispatched")'
+
+report:
+	$(EMACSCLIENT) --eval '(progn (load-file "$(CURDIR)/emacs/rlm-lab.el") (rlm-lab-generate-findings-and-export) "FINDINGS.org generation and HTML export dispatched")'
 
 test:
 	python3 -m unittest discover -s tests -v
