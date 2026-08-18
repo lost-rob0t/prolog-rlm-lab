@@ -1,4 +1,4 @@
-MODEL_ID ?= qwen35-4b
+MODEL_ID ?= qwen3-8b-q4-k-m
 EMACSCLIENT ?= emacsclient
 
 .PHONY: demo doctor probe smoke recursion classes classes-all frontier analyze export \
