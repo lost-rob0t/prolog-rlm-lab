@@ -11,7 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from bench import resolve_matrix
+from bench import build_combinations, resolve_matrix
 from providers import BudgetExceeded, CostBudget, ModelSpec, OpenAICompatibleProvider
 from rlm import PrologToolbox, correct, normalize_answer
 from tasks import make_task
@@ -157,15 +157,12 @@ class LabTests(unittest.TestCase):
         self.assertEqual(matrix["max_tokens"], 256)
         self.assertEqual(matrix["recursion_levels"], [1, 2])
         self.assertEqual(matrix["conditions"], ["base", "agent_plain", "rlm_verified"])
-        runs_per_model = (
-            len(matrix["families"])
-            * len(matrix["difficulties"])
-            * matrix["instances"]
-            * len(matrix["conditions"])
-            * len(matrix["recursion_levels"])
-            * matrix["trials"]
-        )
-        self.assertEqual(runs_per_model, 48)
+        model = ModelSpec.from_toml({"id": "m", "model": "m", "base_url": "http://example.invalid/v1"})
+        combinations = build_combinations([model], matrix, interleave_models=False)
+        self.assertEqual(len(combinations), 40)
+        base_rows = [row for row in combinations if row[4] == "base"]
+        self.assertEqual(len(base_rows), 8)
+        self.assertTrue(all(row[5] == 1 for row in base_rows))
 
     @unittest.skipUnless(shutil.which("swipl"), "SWI-Prolog not installed")
     def test_reachability_tool(self):
