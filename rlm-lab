@@ -124,7 +124,7 @@ run_task() {
 
   provider_args
   log "model: ${RLM_MODEL:-Qwen3-8B-Q4_K_M}"
-  log "endpoint: ${RLM_ENDPOINT:-${LOCAL_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1}/chat/completions}"
+  log "endpoint: ${PROVIDER_ARGS[1]}"
   run_cli rlm "$query" --context "$context" \
     --context-bytes "${RLM_CONTEXT_BYTES:-4096}" \
     --max-tokens "${RLM_MAX_TOKENS:-128}" \
@@ -137,7 +137,7 @@ run_simple() {
   query="$(<"$ROOT/tasks/simple/query.txt")"
   context="$(<"$ROOT/tasks/simple/context.txt")"
   output="$(mktemp)"
-  trap 'rm -f "$output"' RETURN
+  trap 'rm -f "$output"' EXIT
 
   run_task "$query" "$context" | tee "$output"
   grep -Fq 'LAB_RLM_OK' "$output" || fail \
