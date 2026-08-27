@@ -1,5 +1,6 @@
 MODEL_ID ?= qwen3-8b-q4-k-m
 EMACSCLIENT ?= emacsclient
+RLM_LAB ?= bash ./rlm-lab
 FRONTIER5_MODELS = qwen35-397b-a17b gemini-3-flash grok-45 gpt56-sol claude-opus-5
 FRONTIER5_ARGS = $(foreach model,$(FRONTIER5_MODELS),--model-id $(model))
 OPENROUTER_FREE_MODELS ?= 5
@@ -12,7 +13,7 @@ SWE_WORKERS ?= 2
 .PHONY: demo doctor probe smoke recursion compare classes classes-all starintel frontier frontier5 frontier5-dry \
 	openrouter-free-list openrouter-free-deep openrouter-free-router \
 	swebench-deps swebench-doctor swebench-gold swebench-generate swebench-evaluate \
-	analyze export emacs-check lab findings report test clean clean-demo
+	rlm-doctor rlm-smoke rlm-simple analyze export emacs-check lab findings report test clean clean-demo
 
 demo:
 	./scripts/demo
@@ -26,6 +27,19 @@ probe:
 smoke:
 	./scripts/bench --preset smoke --deployment local --model-id $(MODEL_ID) --quiet || test $$? -eq 1
 	./scripts/analyze
+
+# Production prolog-rlm runtime lane. This is deliberately separate from the
+# historical Python benchmark harness above: no duplicate RLM implementation.
+rlm-doctor:
+	$(RLM_LAB) doctor
+
+# Credential-free production runtime smoke; suitable for local use and CI.
+rlm-smoke:
+	$(RLM_LAB) smoke
+
+# Live depth-1 RLM against the configured local/OpenAI-compatible endpoint.
+rlm-simple:
+	$(RLM_LAB) simple
 
 # Explicit causal comparison: base model -> plain agent -> Prolog-RLM + verifier.
 compare:
@@ -109,6 +123,8 @@ report:
 	$(EMACSCLIENT) --eval '(progn (load-file "$(CURDIR)/emacs/rlm-lab.el") (rlm-lab-generate-findings-and-export) "FINDINGS.org generation and HTML export dispatched")'
 
 test:
+	bash -n ./rlm-lab
+	bash ./rlm-lab help >/dev/null
 	python3 -m unittest discover -s tests -v
 
 clean-demo:

@@ -1,0 +1,1 @@
+Read the supplied external context and return exactly the token it tells you to return. Return only that token.

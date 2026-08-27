@@ -1,0 +1,1 @@
+This is a prolog-rlm-lab smoke task. The exact token to return is LAB_RLM_OK.

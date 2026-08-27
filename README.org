@@ -5,7 +5,68 @@
 
 * What this is
 
-An Org-mode benchmark lab for measuring how much model capability Prolog-RLM can substitute with symbolic state, search, recursion, and verification.
+A runtime-first lab for exercising the real =prolog-rlm= harness and then measuring how much model capability Prolog-RLM can substitute with symbolic state, search, recursion, and verification.
+
+There are now two deliberately separate lanes:
+
+- the *production runtime lane* calls the SWI-Prolog =prolog-rlm= CLI directly;
+- the *benchmark lane* keeps the existing Python experiment/analysis machinery for controlled matrices and reports.
+
+The lab does not maintain a second implementation of the RLM runtime.
+
+* Runtime quick start
+
+Keep =prolog-rlm= and =prolog-rlm-lab= as sibling checkouts, or set =PROLOG_RLM_DIR= explicitly.
+
+#+begin_src sh
+# zero-credential production-runtime checks
+./rlm-lab doctor
+./rlm-lab smoke
+
+# same commands through make
+make rlm-doctor
+make rlm-smoke
+#+end_src
+
+=smoke= exercises the real production context and recursion demos without pretending a fake provider is live model integration.
+
+For one actual bounded depth-1 RLM call against the local llama.cpp endpoint:
+
+#+begin_src sh
+./rlm-lab simple
+#+end_src
+
+The shipped task reads =tasks/simple/query.txt= and =tasks/simple/context.txt= and must recover =LAB_RLM_OK=. The defaults match the lab's existing llama.cpp setup:
+
+#+begin_example
+RLM_ENDPOINT=http://127.0.0.1:8000/v1/chat/completions
+RLM_MODEL=Qwen3-8B-Q4_K_M
+#+end_example
+
+The entrypoint also honors =LOCAL_OPENAI_BASE_URL= and =LOCAL_API_KEY= from =.env=. Override the runtime checkout or provider explicitly when needed:
+
+#+begin_src sh
+PROLOG_RLM_DIR=~/src/prolog-rlm ./rlm-lab smoke
+
+RLM_ENDPOINT=http://127.0.0.1:8000/v1/chat/completions \
+RLM_MODEL=Qwen3-8B-Q4_K_M \
+./rlm-lab task \
+  "What token is in the context?" \
+  "The token is HELLO_RLM."
+#+end_src
+
+Useful entrypoint commands:
+
+#+begin_example
+./rlm-lab doctor
+./rlm-lab smoke
+./rlm-lab demo context
+./rlm-lab demo recursion
+./rlm-lab simple
+./rlm-lab task "<query>" "<context>"
+#+end_example
+
+* Benchmark lane
 
 The benchmark varies:
 
@@ -104,7 +165,7 @@ Remote models are disabled by default. Enabling an API lane requires both:
 1. setting the matching API key and exact provider model slug in =.env=, and
 2. explicitly passing =--allow-paid=.
 
-The harness never silently falls back from local inference to a paid endpoint.
+The benchmark harness never silently falls back from local inference to a paid endpoint.
 
 Example preflight:
 
@@ -118,7 +179,7 @@ Example run:
 ./scripts/bench --preset frontier --deployment remote --allow-paid --model-id claude-opus-5
 #+end_src
 
-* Quick start
+* Benchmark quick start
 
 #+begin_src sh
 python3 -m venv .venv
@@ -149,8 +210,15 @@ Edit =config/models.toml= as the model landscape changes. Analysis groups by dec
 
 * Requirements
 
+Runtime lane:
+
+- SWI-Prolog 9+
+- a checkout of =lost-rob0t/prolog-rlm=
+- an OpenAI-compatible model endpoint only for live =simple/task= calls
+
+Benchmark/report lane:
+
 - Python 3.11+
-- SWI-Prolog
 - an OpenAI-compatible model endpoint for real inference
 - Emacs 29+ recommended
 - a running Emacs server for =make lab/findings/report=
@@ -162,6 +230,8 @@ Edit =config/models.toml= as the model landscape changes. Analysis groups by dec
 * Layout
 
 #+begin_example
+rlm-lab                    runtime-first shell entrypoint
+tasks/simple/              tiny live RLM task fixture
 LAB.org                    interactive benchmark notebook
 tasks.org                  local GPU/server + operational Org tasks
 REPORT.org                 HTML report assembly via #+INCLUDE
@@ -171,8 +241,8 @@ config/experiment.toml     benchmark matrix
 src/bench.py               runner + mandatory provider preflight
 src/doctor.py              endpoint/model diagnostics
 src/tasks.py               deterministic task generators
-src/providers.py           OpenAI-compatible provider + /models probe
-src/rlm.py                 recursive symbolic tool loop
+src/providers.py           OpenAI-compatible benchmark provider
+src/rlm.py                 legacy benchmark experiment loop
 src/analyze.py             summaries and Org tables
 src/plots.py               SVG plot generation
 src/prolog/oracle.pl       safe symbolic query helper
