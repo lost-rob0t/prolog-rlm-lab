@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
+log() {
+  printf '[rlm-lab] %s\n' "$*" >&2
+}
+
+fail() {
+  printf '[rlm-lab] error: %s\n' "$*" >&2
+  exit 2
+}
+
+usage() {
+  cat <<'EOF'
+prolog-rlm-lab runtime entrypoint
+
+Usage:
+  ./rlm-lab doctor
+  ./rlm-lab smoke
+  ./rlm-lab demo [context|tool|recursion]
+  ./rlm-lab simple
+  ./rlm-lab task "<query>" "<context>"
+
+Commands:
+  doctor  Verify SWI-Prolog and the prolog-rlm checkout.
+  smoke   Run credential-free production-runtime context + recursion demos.
+  demo    Run one production-runtime demo family.
+  simple  Run the shipped live depth-1 RLM task and require LAB_RLM_OK.
+  task    Run one live depth-1 RLM task with inline query/context.
+
+Runtime discovery:
+  PROLOG_RLM_DIR=/path/to/prolog-rlm
+  Otherwise ../prolog-rlm is used when the repos are sibling checkouts.
+
+Live provider defaults:
+  RLM_ENDPOINT=http://127.0.0.1:8000/v1/chat/completions
+  RLM_MODEL=Qwen3-8B-Q4_K_M
+
+The existing lab variables LOCAL_OPENAI_BASE_URL and LOCAL_API_KEY are also
+honored. If LOCAL_API_KEY is empty, local calls use --no-credential.
+EOF
+}
+
+resolve_runtime() {
+  local candidate
+
+  if [[ -n "${PROLOG_RLM_DIR:-}" ]]; then
+    candidate="$PROLOG_RLM_DIR"
+  else
+    candidate="$ROOT/../prolog-rlm"
+  fi
+
+  [[ -f "$candidate/bin/prolog-rlm.pl" ]] || fail \
+    "prolog-rlm not found at $candidate; set PROLOG_RLM_DIR"
+
+  RLM_DIR="$(cd "$candidate" && pwd)"
+  RLM_CLI="$RLM_DIR/bin/prolog-rlm.pl"
+}
+
+doctor() {
+  command -v swipl >/dev/null 2>&1 || fail 'swipl is not on PATH'
+  resolve_runtime
+
+  log "SWI-Prolog: $(swipl --version | head -n 1)"
+  log "runtime: $RLM_DIR"
+  (
+    cd "$RLM_DIR"
+    swipl -q -g "use_module('prolog/rlm'), rlm:rlm_ready, halt"
+  )
+  log 'runtime ready'
+}
+
+run_cli() {
+  resolve_runtime
+  (
+    cd "$RLM_DIR"
+    swipl -q -s "$RLM_CLI" -- "$@"
+  )
+}
+
+run_demo() {
+  local family="${1:-recursion}"
+  case "$family" in
+    context|tool|recursion)
+      run_cli demo "$family"
+      ;;
+    *)
+      fail "unknown demo family: $family"
+      ;;
+  esac
+}
+
+provider_args() {
+  local base endpoint model
+  model="${RLM_MODEL:-Qwen3-8B-Q4_K_M}"
+
+  if [[ -n "${RLM_ENDPOINT:-}" ]]; then
+    endpoint="$RLM_ENDPOINT"
+  else
+    base="${LOCAL_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1}"
+    endpoint="${base%/}/chat/completions"
+  fi
+
+  PROVIDER_ARGS=(--endpoint "$endpoint" --model "$model")
+  if [[ -n "${LOCAL_API_KEY:-}" ]]; then
+    PROVIDER_ARGS+=(--credential-env LOCAL_API_KEY)
+  else
+    PROVIDER_ARGS+=(--no-credential)
+  fi
+}
+
+run_task() {
+  local query="$1"
+  local context="$2"
+
+  provider_args
+  log "model: ${RLM_MODEL:-Qwen3-8B-Q4_K_M}"
+  log "endpoint: ${RLM_ENDPOINT:-${LOCAL_OPENAI_BASE_URL:-http://127.0.0.1:8000/v1}/chat/completions}"
+  run_cli rlm "$query" --context "$context" \
+    --context-bytes "${RLM_CONTEXT_BYTES:-4096}" \
+    --max-tokens "${RLM_MAX_TOKENS:-128}" \
+    --time-limit "${RLM_TIME_LIMIT:-45}" \
+    "${PROVIDER_ARGS[@]}"
+}
+
+run_simple() {
+  local query context output
+  query="$(<"$ROOT/tasks/simple/query.txt")"
+  context="$(<"$ROOT/tasks/simple/context.txt")"
+  output="$(mktemp)"
+  trap 'rm -f "$output"' RETURN
+
+  run_task "$query" "$context" | tee "$output"
+  grep -Fq 'LAB_RLM_OK' "$output" || fail \
+    'live RLM completed but did not return LAB_RLM_OK'
+  log 'simple task passed'
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+
+  case "$command" in
+    help|-h|--help)
+      usage
+      ;;
+    doctor)
+      doctor
+      ;;
+    smoke)
+      doctor
+      run_demo context
+      run_demo recursion
+      ;;
+    demo)
+      run_demo "${1:-recursion}"
+      ;;
+    simple)
+      run_simple
+      ;;
+    task)
+      [[ $# -eq 2 ]] || fail 'task requires exactly: <query> <context>'
+      run_task "$1" "$2"
+      ;;
+    *)
+      usage >&2
+      fail "unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"
